@@ -84,10 +84,27 @@ services:
       timeout: 5s
       retries: 5
 
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"        # pgAdmin Web UI
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - catalogdb
+      - orderingdb
+      - discountdb
+
 volumes:
   catalogdb_data:
   orderingdb_data:
   discountdb_data:
   basketdb_data:
   rabbitmq_data:
+  pgadmin_data:
 

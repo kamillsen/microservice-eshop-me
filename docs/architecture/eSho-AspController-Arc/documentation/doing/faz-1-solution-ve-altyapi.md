@@ -61,8 +61,14 @@ mkdir -p tests
 - Management UI ile
 - Port: 5673 (AMQP - 5672 kullanılıyordu, 5673'e değiştirildi), 15673 (Management UI - 15672 kullanılıyordu, 15673'e değiştirildi)
 
+#### pgAdmin container ekle (opsiyonel ama önerilir)
+- PostgreSQL veritabanlarına web üzerinden erişim için
+- Port: 5050:80 (Web UI)
+- Email: admin@admin.com, Password: admin
+- depends_on: catalogdb, orderingdb, discountdb
+
 #### Volume'ları tanımla
-- Veri kalıcılığı için (catalogdb_data, basketdb_data, orderingdb_data, discountdb_data, rabbitmq_data)
+- Veri kalıcılığı için (catalogdb_data, basketdb_data, orderingdb_data, discountdb_data, rabbitmq_data, pgadmin_data)
 
 #### .env dosyası oluştur (opsiyonel)
 
@@ -71,6 +77,11 @@ mkdir -p tests
 - PostgreSQL: `docker exec -it catalogdb psql -U postgres -d CatalogDb`
 - Redis: `docker exec -it basketdb redis-cli ping`
 - RabbitMQ: http://localhost:15673 (guest/guest - 15672 kullanılıyordu, 15673'e değiştirildi)
+- pgAdmin: http://localhost:5050 (admin@admin.com / admin)
+  - Her PostgreSQL veritabanı için ayrı server kaydı oluştur:
+    - CatalogDb: host=catalogdb, port=5432
+    - OrderingDb: host=orderingdb, port=5432
+    - DiscountDb: host=discountdb, port=5432
 
 **Sonuç:** ✅ Altyapı hazır, servisler için hazırız
 
@@ -87,7 +98,8 @@ mkdir -p tests
 7. PostgreSQL container'ları ekle (3 adet)
 8. Redis container ekle
 9. RabbitMQ container ekle
-10. Volume'ları tanımla
-11. Test et (tüm container'lar çalışıyor mu?)
+10. pgAdmin container ekle (PostgreSQL yönetimi için)
+11. Volume'ları tanımla
+12. Test et (tüm container'lar çalışıyor mu?)
 
 **Bu adımlar tamamlandıktan sonra Faz 2'ye (BuildingBlocks) geçilebilir.**

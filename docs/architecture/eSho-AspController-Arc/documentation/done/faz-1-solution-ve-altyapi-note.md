@@ -291,12 +291,21 @@ src/
 - Kullanıcı: `guest`, Şifre: `guest`
 - Hostname: `ecommerce-mq`
 
-#### 4. Volume'lar:
+#### 4. pgAdmin Container:
+- `pgadmin` → Port: 5050:80 (Web UI)
+- Image: `dpage/pgadmin4:latest`
+- Email: `admin@admin.com`
+- Password: `admin`
+- PostgreSQL veritabanlarına web üzerinden erişim sağlar
+- `depends_on`: catalogdb, orderingdb, discountdb (PostgreSQL container'ları başladıktan sonra başlar)
+
+#### 5. Volume'lar:
 - `catalogdb_data` → PostgreSQL verileri
 - `orderingdb_data` → PostgreSQL verileri
 - `discountdb_data` → PostgreSQL verileri
 - `basketdb_data` → Redis verileri
 - `rabbitmq_data` → RabbitMQ verileri
+- `pgadmin_data` → pgAdmin yapılandırma ve bağlantı bilgileri
 
 **Volume'lar Neden Gerekli?**
 - Container silinse bile veriler kalır
@@ -399,6 +408,52 @@ docker exec -it basketdb redis-cli ping
 
 **Beklenen:** RedisInsight UI açılmalı
 
+**7. pgAdmin Test:**
+- Tarayıcıda aç: http://localhost:5050
+- Email: `admin@admin.com`
+- Password: `admin`
+
+**Beklenen:** pgAdmin login ekranı açılmalı
+
+**pgAdmin'de PostgreSQL Veritabanlarına Bağlanma:**
+
+Her veritabanı için ayrı bir server kaydı oluşturulmalı:
+
+**CatalogDb:**
+- General Tab → Name: `CatalogDb`
+- Connection Tab:
+  - Host name/address: `catalogdb` (container adı)
+  - Port: `5432` (container içindeki port)
+  - Maintenance database: `CatalogDb`
+  - Username: `postgres`
+  - Password: `postgres`
+  - Save password?: ON
+
+**OrderingDb:**
+- General Tab → Name: `OrderingDb`
+- Connection Tab:
+  - Host name/address: `orderingdb` (container adı)
+  - Port: `5432` (container içindeki port)
+  - Maintenance database: `OrderingDb`
+  - Username: `postgres`
+  - Password: `postgres`
+  - Save password?: ON
+
+**DiscountDb:**
+- General Tab → Name: `DiscountDb`
+- Connection Tab:
+  - Host name/address: `discountdb` (container adı)
+  - Port: `5432` (container içindeki port)
+  - Maintenance database: `DiscountDb`
+  - Username: `postgres`
+  - Password: `postgres`
+  - Save password?: ON
+
+**Önemli Notlar:**
+- pgAdmin sadece PostgreSQL için çalışır. Redis için RedisInsight UI kullanılır.
+- Host olarak container adlarını (`catalogdb`, `orderingdb`, `discountdb`) kullanın, `localhost` değil.
+- Port her zaman `5432` (container içindeki port). Host'taki portlar (5432, 5434, 5435) değil.
+
 ---
 
 ### 1.2 Bölümü - Tamamlanan Kontroller
@@ -407,11 +462,13 @@ docker exec -it basketdb redis-cli ping
 ✅ PostgreSQL container'ları tanımlandı (3 adet)
 ✅ Redis container tanımlandı
 ✅ RabbitMQ container tanımlandı
-✅ Volume'lar tanımlandı (5 adet)
+✅ pgAdmin container eklendi (PostgreSQL yönetimi için)
+✅ Volume'lar tanımlandı (6 adet: catalogdb_data, orderingdb_data, discountdb_data, basketdb_data, rabbitmq_data, pgadmin_data)
 ✅ `.env` dosyası oluşturuldu (opsiyonel)
 ✅ Docker Compose V2 kontrol edildi
 ✅ Container'lar başlatıldı ve test edildi
 ✅ Port çakışmaları çözüldü (OrderingDb: 5435, RabbitMQ: 5673/15673)
+✅ pgAdmin'de PostgreSQL veritabanlarına bağlantılar oluşturuldu
 
 ### Güncel Port Tablosu
 
@@ -424,6 +481,7 @@ docker exec -it basketdb redis-cli ping
 | **RedisInsight** | 8001 | Redis UI |
 | **RabbitMQ AMQP** | 5673 | Message Broker (5672 kullanılıyordu, 5673'e değiştirildi) |
 | **RabbitMQ Management** | 15673 | Management UI (15672 kullanılıyordu, 15673'e değiştirildi) |
+| **pgAdmin** | 5050 | PostgreSQL Web UI |
 
 **Not:** Port çakışmaları nedeniyle bazı portlar değiştirildi. Sistemde zaten kullanılan portlar:
 - 5433 → OrderingDb için 5435 kullanılıyor
