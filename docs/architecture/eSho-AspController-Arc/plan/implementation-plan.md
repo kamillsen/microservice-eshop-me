@@ -177,7 +177,7 @@ Host={hostname};Port={port};Database={database};Username={username};Password={pa
 ```
 amqp://{username}:{password}@{hostname}:{port}
 ```
-**Örnek:** `amqp://guest:guest@messagebroker:5672`
+**Örnek:** `amqp://guest:guest@messagebroker:5673` (5672 kullanılıyordu, 5673'e değiştirildi)
 
 ### appsettings.json Yapısı
 
@@ -315,7 +315,7 @@ amqp://{username}:{password}@{hostname}:{port}
 **Test:** `docker-compose up -d` → Tüm container'lar çalışıyor mu?
 - PostgreSQL: `docker exec -it catalogdb psql -U postgres -d CatalogDb`
 - Redis: `docker exec -it basketdb redis-cli ping`
-- RabbitMQ: http://localhost:15672 (guest/guest)
+- RabbitMQ: http://localhost:15673 (guest/guest - 15672 kullanılıyordu, 15673'e değiştirildi)
 
 **Sonuç:** ✅ Altyapı hazır, servisler için hazırız
 
