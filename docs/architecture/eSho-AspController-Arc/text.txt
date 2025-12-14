@@ -1,0 +1,27 @@
+1) Her şey docker ile ayağa kalkacak. Tek komut ama ayrı ayrı arkada kalkacak.
+    => Burda docker hubdan container bulurken örnek veriyorum ; Redis için birden fazla , 
+    arayüz sunan farkı farklı docker container'ları var mı ?
+
+2) Projenin bir sonraki versiyonunda tüm containerların durumunu gösteren, logları alan bir 
+dashboarad istiyorum. .Net Aspire gibi mesela.  Bunun için neler var sonra araştırcaz ?
+Peki sonrasında bunu yapmak  için mimarimiz uygun mu ? 
+
+3) Bu projede front olabilir ama ben version 2 de . Buna hazırlıklı olmalıyız. Ama şimdilik
+frontu da bu projede olacak.
+
+4) DB localde değil docker ortamında olacak. Sanki githubdan microservice projesi indirmişte
+orda docker ile db ayağa kaldırmak gibi. Ama kalıcı bilgiler olacak içinde . Sonrasında githubdan 
+clone yapan da docker ile ayağa kaldırınca onda da ayağa kalkan DB de bu veriler olsun.
+
+
+
+5) Projeye başlamadan önce bir plan çıkarmalıyız. Bu plan öyle bir şey olmalı ki ben ara verip
+daha sonra PC açıp projede AI'a incel dedikten sonra şu adımda kaldım dersem , o adımdan aynı 
+kod yazımı yani önceki yazdıkları gibi ve normalde  ara vermeden devam etseydim nasıl yazacaksa 
+o şekilde devam edebilmeli. 
+Bunu yaparken  projeyi adımlara bölmeliyiz. Çünkü ben yaparken kodu 
+satır satır sorgulayacağım.Sana sorucam sonra elimle ben yazıcam. Kullandığımız her şeyi 
+soracağımdan çok hızlı ilerlemem.
+
+
+6) 
