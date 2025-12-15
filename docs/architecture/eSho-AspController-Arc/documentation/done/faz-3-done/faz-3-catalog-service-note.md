@@ -7,6 +7,7 @@
 > - Faz 3.2: Catalog Database & Seed Data
 > - Faz 3.3: Catalog CQRS - Products Commands
 > - Faz 3.4: Catalog CQRS - Products Queries
+> - Faz 3.5: Catalog CQRS - Categories
 
 ---
 
@@ -2614,6 +2615,219 @@ if (categoryId.HasValue)
 - ✅ Koşullu filtreleme yapılabilir
 - ✅ Dinamik sorgu oluşturulabilir
 - ✅ Performans: Filtreleme veritabanında yapılır
+
+---
+
+## 3.5 Catalog CQRS - Categories - Yapılanlar
+
+**Hedef:** Category işlemleri (GetAll, GetById, Create) için CQRS pattern ile Query ve Command'lar oluşturmak
+
+---
+
+### Adım 1: Category DTO'ları Oluştur
+
+**Dosya Konumları:**
+- `src/Services/Catalog/Catalog.API/Dtos/CategoryDto.cs`
+- `src/Services/Catalog/Catalog.API/Dtos/CreateCategoryDto.cs`
+
+**Neden `Dtos/` klasöründe?**
+- API response/request için DTO'lar
+- Product DTO'larıyla aynı klasörde (tutarlılık)
+
+**CategoryDto.cs:**
+- **Namespace:** `Catalog.API.Dtos`
+- **Property'ler:** `Id` (Guid), `Name` (string)
+- **Ne işe yarar:** API response'larında kategori bilgilerini döndürmek için
+- **Neden gerekli:** Entity'yi doğrudan döndürmek yerine DTO kullanmak (güvenlik, esneklik)
+
+**CreateCategoryDto.cs:**
+- **Namespace:** `Catalog.API.Dtos`
+- **Property:** `Name` (string)
+- **Ne işe yarar:** Gelecekte Controller'larda request body için kullanılabilir (şu an Command kullanılıyor)
+
+**Sonuç:** ✅ Category DTO'ları oluşturuldu
+
+---
+
+### Adım 2: GetCategoriesQuery + Handler Oluştur
+
+**Dosya Konumları:**
+- `src/Services/Catalog/Catalog.API/Features/Categories/Queries/GetCategories/GetCategoriesQuery.cs`
+- `src/Services/Catalog/Catalog.API/Features/Categories/Queries/GetCategories/GetCategoriesHandler.cs`
+
+**Neden `Features/Categories/Queries/GetCategories/` klasöründe?**
+- CQRS pattern: Categories feature'ı, Query işlemi, GetCategories query'si
+- Products'a benzer klasör yapısı (tutarlılık)
+
+**GetCategoriesQuery.cs:**
+- **Namespace:** `Catalog.API.Features.Categories.Queries.GetCategories`
+- **Kullanılan Kütüphaneler:** `MediatR`, `Catalog.API.Dtos`
+- **Interface:** `IRequest<IEnumerable<CategoryDto>>`
+- **Neden boş?** Tüm kategorileri getirmek için parametreye gerek yok (kategori sayısı az, sayfalama gerekmez)
+
+**GetCategoriesHandler.cs:**
+- **Namespace:** `Catalog.API.Features.Categories.Queries.GetCategories`
+- **Kullanılan Kütüphaneler:** `MediatR`, `AutoMapper`, `Microsoft.EntityFrameworkCore`, `Catalog.API.Data`, `Catalog.API.Dtos`
+- **İşlemler:**
+  1. DbContext'ten tüm kategorileri getir (`ToListAsync`)
+  2. AutoMapper ile Entity → DTO mapping
+  3. `IEnumerable<CategoryDto>` döndür
+
+**Sonuç:** ✅ GetCategoriesQuery + Handler oluşturuldu
+
+---
+
+### Adım 3: GetCategoryByIdQuery + Handler Oluştur
+
+**Dosya Konumları:**
+- `src/Services/Catalog/Catalog.API/Features/Categories/Queries/GetCategoryById/GetCategoryByIdQuery.cs`
+- `src/Services/Catalog/Catalog.API/Features/Categories/Queries/GetCategoryById/GetCategoryByIdHandler.cs`
+
+**Neden `Features/Categories/Queries/GetCategoryById/` klasöründe?**
+- Her query kendi klasöründe (GetCategories, GetCategoryById ayrı)
+
+**GetCategoryByIdQuery.cs:**
+- **Namespace:** `Catalog.API.Features.Categories.Queries.GetCategoryById`
+- **Kullanılan Kütüphaneler:** `MediatR`, `Catalog.API.Dtos`
+- **Interface:** `IRequest<CategoryDto>` (tek nesne)
+- **Property:** `Id` (Guid) - Hangi kategori getirilecek
+
+**GetCategoryByIdHandler.cs:**
+- **Namespace:** `Catalog.API.Features.Categories.Queries.GetCategoryById`
+- **Kullanılan Kütüphaneler:** `MediatR`, `AutoMapper`, `Catalog.API.Data`, `Catalog.API.Entities`, `Catalog.API.Dtos`, `BuildingBlocks.Exceptions.Exceptions`
+- **İşlemler:**
+  1. `FindAsync` ile kategoriyi bul (Category basit, Include gerekmez)
+  2. NotFound kontrolü: `NotFoundException` fırlat
+  3. AutoMapper ile Entity → DTO mapping
+  4. `CategoryDto` döndür
+
+**Önemli Not:** Category'de navigation property yok (Products'a ihtiyaç yok), bu yüzden `FindAsync` kullanılabilir (Product'ta `FirstOrDefaultAsync` + Include kullanmıştık)
+
+**Sonuç:** ✅ GetCategoryByIdQuery + Handler oluşturuldu
+
+---
+
+### Adım 4: CreateCategoryCommand + Handler + Validator Oluştur
+
+**Dosya Konumları:**
+- `src/Services/Catalog/Catalog.API/Features/Categories/Commands/CreateCategory/CreateCategoryCommand.cs`
+- `src/Services/Catalog/Catalog.API/Features/Categories/Commands/CreateCategory/CreateCategoryHandler.cs`
+- `src/Services/Catalog/Catalog.API/Features/Categories/Commands/CreateCategory/CreateCategoryValidator.cs`
+
+**Neden `Features/Categories/Commands/CreateCategory/` klasöründe?**
+- CQRS pattern: Command işlemi, CreateCategory command'i
+- Products'a benzer klasör yapısı
+
+**CreateCategoryCommand.cs:**
+- **Namespace:** `Catalog.API.Features.Categories.Commands.CreateCategory`
+- **Kullanılan Kütüphaneler:** `MediatR`
+- **Interface:** `IRequest<Guid>` (Category ID döner)
+- **Property:** `Name` (string) - Kategori adı
+
+**CreateCategoryHandler.cs:**
+- **Namespace:** `Catalog.API.Features.Categories.Commands.CreateCategory`
+- **Kullanılan Kütüphaneler:** `MediatR`, `AutoMapper`, `Catalog.API.Data`, `Catalog.API.Entities`
+- **İşlemler:**
+  1. AutoMapper ile Command → Entity mapping
+  2. `Id = Guid.NewGuid()` oluştur
+  3. DbContext'e ekle ve kaydet
+  4. Category ID döndür
+
+**CreateCategoryValidator.cs:**
+- **Namespace:** `Catalog.API.Features.Categories.Commands.CreateCategory`
+- **Kullanılan Kütüphaneler:** `FluentValidation`
+- **Base Class:** `AbstractValidator<CreateCategoryCommand>`
+- **Validation Kuralları:**
+  - `Name`: NotEmpty, MaximumLength(50)
+- **Ne işe yarar:** ValidationBehavior pipeline'ında otomatik çalışır, hata varsa ValidationException fırlatır
+
+**Sonuç:** ✅ CreateCategoryCommand + Handler + Validator oluşturuldu
+
+---
+
+### Adım 5: AutoMapper Profile Güncelleme
+
+**Dosya Konumu:**
+- `src/Services/Catalog/Catalog.API/Mapping/MappingProfile.cs`
+
+**Eklenen Mapping'ler:**
+- `CreateCategoryCommand` → `Category` (Command → Entity)
+- `Category` → `CategoryDto` (Entity → DTO)
+
+**Neden gerekli?**
+- Command'den Entity'ye dönüşüm için (CreateCategoryHandler'da)
+- Entity'den DTO'ya dönüşüm için (Query Handler'larda)
+
+**Otomatik Mapping:**
+- Property adları aynı olduğu için (`Id`, `Name`) otomatik mapping çalışır
+- ForMember gerekmez (ProductDto'daki CategoryName gibi özel mapping yok)
+
+**Sonuç:** ✅ AutoMapper Profile güncellendi
+
+---
+
+## 3.5 Bölümü - Tamamlanan Kontroller
+
+✅ CategoryDto oluşturuldu
+✅ CreateCategoryDto oluşturuldu
+✅ GetCategoriesQuery + Handler oluşturuldu
+✅ GetCategoryByIdQuery + Handler oluşturuldu (NotFoundException ile)
+✅ CreateCategoryCommand + Handler + Validator oluşturuldu
+✅ AutoMapper Profile güncellendi (Category mapping'leri)
+✅ Proje build oluyor mu? (`dotnet build`) → ✅ Başarıyla build oluyor (0 uyarı, 0 hata)
+
+---
+
+## Öğrenilenler (Faz 3.5)
+
+### Category vs Product Farkları
+
+**Category Daha Basit:**
+- Sadece `Id` ve `Name` property'leri var
+- Navigation property yok (Include gerekmez)
+- `FindAsync` kullanılabilir (Product'ta `FirstOrDefaultAsync` + Include kullanmıştık)
+
+**Product Daha Karmaşık:**
+- Daha fazla property (Name, Description, Price, ImageUrl, CategoryId)
+- Navigation property var (`Category`) - Include gerekir (CategoryName için)
+- `FirstOrDefaultAsync` + Include kullanılır
+
+### GetCategoriesQuery Neden Boş?
+
+**Neden parametre yok?**
+- Tüm kategorileri getiriyoruz (filtreleme gerekmez)
+- Kategori sayısı az (10-50 arası) - sayfalama gerekmez
+- GetProductsQuery'de sayfalama var çünkü ürün sayısı binlerce olabilir
+
+**Ne zaman parametre eklenir?**
+- Eğer kategori sayısı çok artarsa sayfalama eklenebilir
+- Filtreleme ihtiyacı olursa (örnek: aktif kategoriler) parametre eklenebilir
+
+### Category Query'lerde Include Gerekmez
+
+**Neden?**
+- Category entity'sinde navigation property (`Products`) var ama Query'lerde gerekmez
+- Sadece Category bilgisi döndürülüyor, ürün bilgisi istenmiyor
+- GetProductByIdQuery'de Include kullanmıştık çünkü CategoryName gerekliydi
+
+**Ne zaman Include gerekir?**
+- Eğer CategoryDto'ya ürün sayısı eklenirse: `Include(c => c.Products).Select(c => new { c.Id, c.Name, ProductCount = c.Products.Count })`
+- Şu an böyle bir ihtiyaç yok, bu yüzden Include kullanılmadı
+
+### FluentValidation - Category Validator
+
+**Kurallar:**
+- `Name`: NotEmpty (boş olamaz)
+- `Name`: MaximumLength(50) (max 50 karakter)
+
+**Neden bu kurallar?**
+- Entity konfigürasyonunda (`CatalogDbContext.OnModelCreating`) `Name` max 50 karakter olarak tanımlı
+- API seviyesinde de aynı kural kontrol edilir (veri bütünlüğü)
+
+**ValidationBehavior:**
+- MediatR pipeline'ında otomatik çalışır
+- CreateCategoryCommand gönderilince `CreateCategoryValidator` çalışır
+- Hata varsa `ValidationException` fırlatılır, Handler'a gitmez
 
 ---
 
