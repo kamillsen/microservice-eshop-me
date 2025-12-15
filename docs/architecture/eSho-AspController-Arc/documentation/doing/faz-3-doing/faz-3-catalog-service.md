@@ -635,3 +635,4 @@ app.MapHealthChecks("/health");
 25. Tüm endpoint'leri test et
 
 **Bu adımlar tamamlandıktan sonra Faz 4'e (Discount Service) geçilebilir.**
+
