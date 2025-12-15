@@ -24,4 +24,5 @@ satır satır sorgulayacağım.Sana sorucam sonra elimle ben yazıcam. Kullandı
 soracağımdan çok hızlı ilerlemem.
 
 
-6) 
+6) !!! her fazda version-(kaçıncı faz , kaçıncı adım )
+    version-2.1 yapılabilir ya da direk 2. faz version-2 de tamaen biter.

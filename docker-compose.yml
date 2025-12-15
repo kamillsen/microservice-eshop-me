@@ -1,0 +1,110 @@
+services:
+  # ==================== INFRASTRUCTURE ====================
+  
+  catalogdb:
+    image: postgres:16-alpine
+    container_name: catalogdb
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: CatalogDb
+    ports:
+      - "5432:5432"
+    volumes:
+      - catalogdb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  orderingdb:
+    image: postgres:16-alpine
+    container_name: orderingdb
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: OrderingDb
+    ports:
+      - "5435:5432"  # 5433 zaten kullanılıyor, 5435'e değiştirdik
+    volumes:
+      - orderingdb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  discountdb:
+    image: postgres:16-alpine
+    container_name: discountdb
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: DiscountDb
+    ports:
+      - "5434:5432"
+    volumes:
+      - discountdb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  basketdb:
+    image: redis/redis-stack:latest
+    container_name: basketdb
+    ports:
+      - "6379:6379"      # Redis
+      - "8001:8001"      # RedisInsight UI
+    volumes:
+      - basketdb_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  messagebroker:
+    image: rabbitmq:3-management-alpine
+    container_name: messagebroker
+    hostname: ecommerce-mq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5673:5672"      # AMQP (5672 zaten kullanılıyor, 5673'e değiştirdik)
+      - "15673:15672"    # Management UI (15672 zaten kullanılıyor, 15673'e değiştirdik)
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"        # pgAdmin Web UI
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - catalogdb
+      - orderingdb
+      - discountdb
+
+volumes:
+  catalogdb_data:
+  orderingdb_data:
+  discountdb_data:
+  basketdb_data:
+  rabbitmq_data:
+  pgadmin_data:
+

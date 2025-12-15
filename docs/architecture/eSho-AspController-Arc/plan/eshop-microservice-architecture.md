@@ -978,7 +978,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: OrderingDb
     ports:
-      - "5433:5432"
+      - "5435:5432"  # 5433 kullanılıyordu, 5435'e değiştirildi
     volumes:
       - orderingdb_data:/var/lib/postgresql/data
 
@@ -1002,10 +1002,26 @@ services:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
     ports:
-      - "5672:5672"      # AMQP
-      - "15672:15672"    # Management UI
+      - "5673:5672"      # AMQP (5672 kullanılıyordu, 5673'e değiştirildi)
+      - "15673:15672"    # Management UI (15672 kullanılıyordu, 15673'e değiştirildi)
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"        # pgAdmin Web UI
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - catalogdb
+      - orderingdb
+      - discountdb
 
   # ==================== SERVICES ====================
 
@@ -1033,7 +1049,7 @@ services:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__Redis=basketdb:6379
       - GrpcSettings__DiscountUrl=http://discount.grpc:8080
-      - MessageBroker__Host=amqp://guest:guest@messagebroker:5672
+      - MessageBroker__Host=amqp://guest:guest@messagebroker:5673
     depends_on:
       - basketdb
       - discount.grpc
@@ -1050,7 +1066,7 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__Database=Host=orderingdb;Port=5432;Database=OrderingDb;Username=postgres;Password=postgres
-      - MessageBroker__Host=amqp://guest:guest@messagebroker:5672
+      - MessageBroker__Host=amqp://guest:guest@messagebroker:5673
     depends_on:
       - orderingdb
       - messagebroker
@@ -1092,6 +1108,7 @@ volumes:
   orderingdb_data:
   discountdb_data:
   rabbitmq_data:
+  pgadmin_data:
 ```
 
 ### Docker Komutları
@@ -1587,7 +1604,7 @@ public class DiscountGrpcService
 |--------|------------|------|--------|
 | Catalog | PostgreSQL | 5432 | İlişkisel veri (Products, Categories) |
 | Basket | Redis | 6379 | Hızlı cache, key-value (sepet geçici) |
-| Ordering | PostgreSQL | 5433 | İlişkisel veri (Orders, OrderItems) |
+| Ordering | PostgreSQL | 5435 | İlişkisel veri (Orders, OrderItems) (5433 kullanılıyordu, 5435'e değiştirildi) |
 | Discount | PostgreSQL | 5434 | İlişkisel veri (Coupons) |
 
 ### Database per Service Pattern
@@ -1858,7 +1875,7 @@ healthcheck:
 | Veritabanı | Port | Container Adı |
 |------------|------|---------------|
 | CatalogDb (PostgreSQL) | 5432 | catalogdb |
-| OrderingDb (PostgreSQL) | 5433 | orderingdb |
+| OrderingDb (PostgreSQL) | 5435 | orderingdb (5433 kullanılıyordu, 5435'e değiştirildi) |
 | DiscountDb (PostgreSQL) | 5434 | discountdb |
 | BasketDb (Redis) | 6379 | basketdb |
 
@@ -1866,8 +1883,9 @@ healthcheck:
 
 | UI | URL | Kullanıcı/Şifre |
 |----|-----|-----------------|
-| **RabbitMQ Management** | http://localhost:15672 | guest / guest |
+| **RabbitMQ Management** | http://localhost:15673 | guest / guest (15672 kullanılıyordu, 15673'e değiştirildi) |
 | **RedisInsight** | http://localhost:8001 | - |
+| **pgAdmin** | http://localhost:5050 | admin@admin.com / admin |
 | **Swagger (Catalog)** | http://localhost:5001/swagger | - |
 | **Swagger (Basket)** | http://localhost:5002/swagger | - |
 | **Swagger (Ordering)** | http://localhost:5003/swagger | - |

@@ -177,7 +177,7 @@ Host={hostname};Port={port};Database={database};Username={username};Password={pa
 ```
 amqp://{username}:{password}@{hostname}:{port}
 ```
-**Örnek:** `amqp://guest:guest@messagebroker:5672`
+**Örnek:** `amqp://guest:guest@messagebroker:5673` (5672 kullanılıyordu, 5673'e değiştirildi)
 
 ### appsettings.json Yapısı
 
@@ -309,13 +309,19 @@ amqp://{username}:{password}@{hostname}:{port}
 - PostgreSQL container'ları ekle (CatalogDb, OrderingDb, DiscountDb)
 - Redis container ekle (Redis Stack + RedisInsight UI)
 - RabbitMQ container ekle (Management UI ile)
+- pgAdmin container ekle (PostgreSQL yönetimi için - opsiyonel ama önerilir)
 - Volume'ları tanımla (veri kalıcılığı için)
 - `.env` dosyası oluştur (opsiyonel)
 
 **Test:** `docker-compose up -d` → Tüm container'lar çalışıyor mu?
 - PostgreSQL: `docker exec -it catalogdb psql -U postgres -d CatalogDb`
 - Redis: `docker exec -it basketdb redis-cli ping`
-- RabbitMQ: http://localhost:15672 (guest/guest)
+- RabbitMQ: http://localhost:15673 (guest/guest - 15672 kullanılıyordu, 15673'e değiştirildi)
+- pgAdmin: http://localhost:5050 (admin@admin.com / admin)
+  - Her PostgreSQL veritabanı için ayrı server kaydı oluştur:
+    - CatalogDb: host=catalogdb, port=5432, database=CatalogDb, user=postgres, password=postgres
+    - OrderingDb: host=orderingdb, port=5432, database=OrderingDb, user=postgres, password=postgres
+    - DiscountDb: host=discountdb, port=5432, database=DiscountDb, user=postgres, password=postgres
 
 **Sonuç:** ✅ Altyapı hazır, servisler için hazırız
 
