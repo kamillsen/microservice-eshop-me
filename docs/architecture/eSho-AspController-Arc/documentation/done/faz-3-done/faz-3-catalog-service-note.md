@@ -4,6 +4,7 @@
 > 
 > **İçerik:**
 > - Faz 3.1: Catalog.API Projesi Oluştur
+> - Faz 3.2: Catalog Database & Seed Data
 
 ---
 
@@ -596,6 +597,402 @@ dotnet add reference ../../BuildingBlocks/BuildingBlocks.Exceptions/BuildingBloc
 **PostgreSQL Connection String Formatı:**
 ```
 Host={host};Port={port};Database={database};Username={user};Password={pass}
+```
+
+---
+
+## 3.2 Catalog Database & Seed Data - Yapılanlar
+
+**Hedef:** Veritabanı şemasını oluşturup örnek verilerle doldurmak
+
+---
+
+### Adım 1: Program.cs'de DbContext Registration
+
+**Dosya:**
+- `Program.cs`
+
+**Ne yapıldı:**
+- `AddDbContext<CatalogDbContext>` eklendi
+- PostgreSQL connection string kullanılarak DbContext yapılandırıldı
+
+**Kod:**
+```csharp
+using Catalog.API.Data;
+using Microsoft.EntityFrameworkCore;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// DbContext Registration
+builder.Services.AddDbContext<CatalogDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Database")));
+```
+
+**Ne işe yarar:**
+- `AddDbContext`: DbContext'i Dependency Injection container'a kaydeder
+- `UseNpgsql`: PostgreSQL provider'ı kullanılacağını belirtir
+- `GetConnectionString("Database")`: `appsettings.json`'daki connection string'i okur
+
+**Neden gerekli?**
+- DbContext'in DI container'dan alınabilmesi için kayıt edilmesi gerekir
+- Controller'larda veya handler'larda DbContext'i constructor'da inject edebilmek için
+
+**Sonuç:** ✅ DbContext registration eklendi
+
+---
+
+### Adım 2: dotnet-ef Tool Kurulumu
+
+**Komut:**
+```bash
+dotnet tool install --global dotnet-ef --version 9.0.0
+```
+
+**Açıklamalar:**
+- `dotnet tool install --global` → Global tool olarak kur (tüm projelerde kullanılabilir)
+- `dotnet-ef` → Entity Framework Core Command Line Tools
+- `--version 9.0.0` → EF Core 9.0.0 versiyonuna uygun tool versiyonu
+
+**Ne işe yarar:**
+- Migration oluşturma (`dotnet ef migrations add`)
+- Migration uygulama (`dotnet ef database update`)
+- Migration silme (`dotnet ef migrations remove`)
+
+**Neden gerekli?**
+- EF Core migration işlemleri için bu tool gerekli
+- `.NET SDK` ile birlikte gelmez, ayrı kurulması gerekir
+
+**Not:** İlk kurulum denemesi başarısız oldu (version belirtmeden), versiyon belirtilince başarılı oldu.
+
+**Sonuç:** ✅ dotnet-ef tool kuruldu
+
+---
+
+### Adım 3: EF Core Migration Oluştur
+
+**Komut:**
+```bash
+cd src/Services/Catalog/Catalog.API
+export DOTNET_ROOT=/usr/lib64/dotnet
+dotnet ef migrations add InitialCreate --startup-project . --context CatalogDbContext
+```
+
+**Açıklamalar:**
+- `dotnet ef migrations add` → Migration oluşturma komutu
+- `InitialCreate` → Migration adı (istersen farklı isim verebilirsin)
+- `--startup-project .` → Startup proje (Catalog.API, şu anki dizin)
+- `--context CatalogDbContext` → Hangi DbContext kullanılacak
+- `export DOTNET_ROOT=/usr/lib64/dotnet` → dotnet-ef tool'unun .NET runtime'ını bulması için (Fedora için gerekli)
+
+**Ne işe yarar:**
+- Entity'lerdeki değişiklikleri veritabanına uygulamak için migration dosyası oluşturur
+- Migration dosyası, veritabanında hangi tabloların oluşturulacağını tanımlar
+
+**Neden gerekli?**
+- Veritabanı şemasını kod olarak yönetmek için
+- Versiyon kontrol sisteminde (Git) migration dosyaları saklanır
+- Farklı ortamlarda (dev, staging, prod) aynı şema oluşturulabilir
+
+**Oluşturulan Dosyalar:**
+- `Migrations/20251215174714_InitialCreate.cs` → Migration dosyası (Up ve Down metodları)
+- `Migrations/20251215174714_InitialCreate.Designer.cs` → Migration metadata dosyası
+- `Migrations/CatalogDbContextModelSnapshot.cs` → Veritabanı model snapshot (mevcut durum)
+
+**Migration Dosyası İçeriği:**
+- `Up()` metodu: Migration uygulandığında yapılacak işlemler (tablolar oluşturulur)
+- `Down()` metodu: Migration geri alındığında yapılacak işlemler (tablolar silinir)
+
+**Sonuç:** ✅ Migration dosyası oluşturuldu
+
+---
+
+### Adım 4: Migration'ı Veritabanına Uygula
+
+**Önkoşul:**
+- PostgreSQL container'ının çalışıyor olması gerekli
+
+**Komutlar:**
+```bash
+# PostgreSQL container'ını başlat (eğer çalışmıyorsa)
+cd /home/kSEN/Desktop/ Projects/microservice-practice-me
+docker compose up -d catalogdb
+
+# Migration'ı uygula
+cd src/Services/Catalog/Catalog.API
+export DOTNET_ROOT=/usr/lib64/dotnet
+dotnet ef database update --startup-project . --context CatalogDbContext
+```
+
+**Açıklamalar:**
+- `docker compose up -d catalogdb` → catalogdb container'ını arka planda başlat
+- `dotnet ef database update` → Bekleyen migration'ları veritabanına uygular
+
+**Ne işe yarar:**
+- Migration dosyasındaki SQL komutlarını veritabanında çalıştırır
+- Tablolar, index'ler, foreign key'ler oluşturulur
+- `__EFMigrationsHistory` tablosu oluşturulur (hangi migration'ların uygulandığını tutar)
+
+**Neden gerekli?**
+- Entity'ler sadece C# class'larıdır, veritabanında tablo yoktur
+- Migration uygulanınca tablolar oluşturulur
+
+**Kontrol:**
+```bash
+docker exec catalogdb psql -U postgres -d CatalogDb -c "\dt"
+```
+
+**Beklenen çıktı:**
+```
+                 List of relations
+ Schema |         Name          | Type  |  Owner   
+--------+-----------------------+-------+----------
+ public | Categories            | table | postgres
+ public | Products              | table | postgres
+ public | __EFMigrationsHistory | table | postgres
+(3 rows)
+```
+
+**Oluşturulan Tablolar:**
+- `Categories`: Id (uuid, PK), Name (varchar(50))
+- `Products`: Id (uuid, PK), Name (varchar(100)), Description (varchar(500)), Price (numeric(18,2)), ImageUrl (varchar(500)), CategoryId (uuid, FK)
+- `__EFMigrationsHistory`: Migration geçmişi tablosu
+
+**Sonuç:** ✅ Migration veritabanına uygulandı
+
+---
+
+### Adım 5: SeedData.cs Oluştur
+
+**Dosya:**
+- `Data/SeedData.cs`
+
+**Ne yapıldı:**
+- Static class oluşturuldu
+- `InitializeAsync` static method eklendi
+- Örnek kategoriler ve ürünler tanımlandı
+
+**Kod Yapısı:**
+```csharp
+public static class SeedData
+{
+    public static async Task InitializeAsync(CatalogDbContext context)
+    {
+        // 1. Kategorileri kontrol et ve ekle
+        if (!await context.Categories.AnyAsync())
+        {
+            // Kategorileri ekle
+        }
+
+        // 2. Ürünleri kontrol et ve ekle
+        if (!await context.Products.AnyAsync())
+        {
+            // Ürünleri ekle
+        }
+    }
+}
+```
+
+**Ne işe yarar:**
+- Uygulama başlangıcında örnek veriler ekler
+- Veri varsa tekrar eklenmez (performans ve veri bütünlüğü için)
+
+**Neden gerekli?**
+- Geliştirme/test için örnek verilerle çalışmak
+- Uygulamayı çalıştırınca hemen test edilebilir
+- Boş veritabanıyla çalışma durumlarını test etmek için
+
+**Seed İçeriği:**
+- **3 Kategori:**
+  - Elektronik
+  - Giyim
+  - Ev & Yaşam
+
+- **9 Ürün (her kategoride 3'er adet):**
+  - Elektronik: iPhone 15, Samsung Galaxy S24, MacBook Pro
+  - Giyim: Beyaz T-Shirt, Siyah Pantolon, Spor Ayakkabı
+  - Ev & Yaşam: Ofis Masası, Rahat Sandalye, LED Lamba
+
+**Kontrol Mekanizması:**
+- `AnyAsync()` → Veritabanında kayıt var mı kontrol eder
+- `!` → Eğer YOKSA içeriye girer ve ekler
+- İkinci çalıştırmada veriler tekrar eklenmez (performans)
+
+**Sonuç:** ✅ SeedData.cs oluşturuldu
+
+---
+
+### Adım 6: Program.cs'de Migration ve Seed Data Çalıştırma
+
+**Dosya:**
+- `Program.cs`
+
+**Ne yapıldı:**
+- `app.Build()` sonrası scope oluşturuldu
+- `MigrateAsync()` eklendi (migration'ları otomatik uygular)
+- `SeedData.InitializeAsync()` eklendi (seed data'yı ekler)
+
+**Kod:**
+```csharp
+var app = builder.Build();
+
+// Migration ve Seed Data
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+    
+    // 1. Migration uygula
+    await context.Database.MigrateAsync();
+    
+    // 2. Seed data ekle
+    await SeedData.InitializeAsync(context);
+}
+
+// Configure the HTTP request pipeline.
+```
+
+**Ne işe yarar:**
+- `MigrateAsync()`: Bekleyen migration'ları otomatik uygular
+- `SeedData.InitializeAsync()`: Veri yoksa örnek verileri ekler
+
+**Neden gerekli?**
+- Uygulama her başladığında migration'ları kontrol eder ve uygular (manuel `dotnet ef database update` gerekmez)
+- Uygulama her başladığında seed data'yı kontrol eder ve yoksa ekler
+
+**Scope Neden Kullanılıyor?**
+- `CatalogDbContext` bir scoped service (her request'te yeni oluşur)
+- Uygulama başlangıcında request olmadığı için manuel scope oluştururuz
+- İş bitince scope dispose olur, kaynaklar temizlenir
+
+**Akış:**
+1. Uygulama başlar (`dotnet run`)
+2. `Program.cs` çalışır
+3. `app.Build()` çalışır (servisler hazırlanır)
+4. Scope oluşturulur
+5. `CatalogDbContext` alınır
+6. `MigrateAsync()` çalışır → Bekleyen migration'lar uygulanır
+7. `SeedData.InitializeAsync(context)` çağrılır → Veri yoksa eklenir
+8. Scope dispose olur
+9. `app.Run()` çalışır (API hazır)
+
+**Sonuç:** ✅ Migration ve Seed Data otomatik çalıştırma eklendi
+
+---
+
+## 3.2 Bölümü - Tamamlanan Kontroller
+
+✅ DbContext Program.cs'de kayıt edildi
+✅ dotnet-ef tool kuruldu
+✅ EF Core Migration oluşturuldu (InitialCreate)
+✅ Migration veritabanına uygulandı (tablolar oluşturuldu)
+✅ SeedData.cs oluşturuldu (örnek kategoriler ve ürünler)
+✅ Program.cs'de MigrateAsync() ve SeedData.InitializeAsync() eklendi
+✅ Proje build oluyor mu? (`dotnet build`) → ✅ Başarıyla build oluyor (0 uyarı, 0 hata)
+
+---
+
+## Öğrenilenler (Faz 3.2)
+
+### Migration (EF Core)
+
+**Migration Nedir?**
+- Veritabanı şema değişikliklerini kod olarak yönetmek için kullanılan dosyalar
+- Entity'lerdeki değişiklikleri veritabanına uygulamak için migration oluşturulur
+- Migration dosyaları versiyon kontrol sisteminde (Git) saklanır
+
+**Migration Nasıl Çalışır?**
+1. Entity'lere değişiklik yapılır (yeni property, yeni entity, vb.)
+2. Migration oluşturulur: `dotnet ef migrations add MigrationAdi`
+3. Migration dosyası oluşturulur (Up ve Down metodları ile)
+4. Migration uygulanır: `dotnet ef database update`
+5. Veritabanı şeması güncellenir
+
+**Migration Dosyası Yapısı:**
+- `Up()` metodu: Migration uygulandığında yapılacak işlemler
+- `Down()` metodu: Migration geri alındığında yapılacak işlemler
+- `__EFMigrationsHistory` tablosu: Hangi migration'ların uygulandığını tutar
+
+**MigrateAsync() Nedir?**
+- `context.Database.MigrateAsync()` → Bekleyen migration'ları otomatik uygular
+- Uygulama başlangıcında çalıştırılırsa, manuel `dotnet ef database update` yapmaya gerek yok
+- Production'da da otomatik migration uygulanabilir (dikkatli kullanılmalı)
+
+**Avantajları:**
+- ✅ Veritabanı şeması kod olarak yönetilir
+- ✅ Versiyon kontrol sisteminde saklanır
+- ✅ Farklı ortamlarda aynı şema oluşturulabilir
+- ✅ Geri alma (rollback) mümkündür
+
+### Seed Data
+
+**Seed Data Nedir?**
+- Uygulama başlangıcında veritabanına otomatik eklenen örnek veriler
+- Geliştirme/test için hazır verilerle çalışmayı sağlar
+
+**Neden Kullanılır?**
+- Geliştirme sırasında örnek verilerle çalışmak
+- Test ortamında hazır veriler
+- Demo/test için hazır veri
+
+**Nasıl Çalışır?**
+1. `InitializeAsync` metodu çağrılır
+2. Veritabanında veri var mı kontrol edilir (`AnyAsync()`)
+3. Veri yoksa örnek veriler eklenir
+4. Veri varsa tekrar eklenmez (performans)
+
+**Kontrol Mekanizması:**
+- `if (!await context.Categories.AnyAsync())` → Kategori yoksa ekle
+- İkinci çalıştırmada veriler tekrar eklenmez
+- Performans ve veri bütünlüğü için önemli
+
+**Best Practices:**
+- ✅ Veri kontrolü yapılmalı (duplicate veri önlenir)
+- ✅ Static method kullanılmalı (instance oluşturmaya gerek yok)
+- ✅ Async/await kullanılmalı (performans)
+- ✅ Development ortamında kullanılmalı (Production'da dikkatli)
+
+### dotnet-ef Tool
+
+**dotnet-ef Tool Nedir?**
+- Entity Framework Core Command Line Tools
+- Migration işlemleri için kullanılan bir tool
+
+**Nasıl Kurulur?**
+```bash
+dotnet tool install --global dotnet-ef --version 9.0.0
+```
+
+**Komutlar:**
+- `dotnet ef migrations add MigrationAdi` → Migration oluştur
+- `dotnet ef database update` → Migration'ları uygula
+- `dotnet ef migrations remove` → Son migration'ı sil
+- `dotnet ef migrations list` → Migration listesini göster
+
+**Neden Gerekli?**
+- EF Core migration işlemleri için bu tool gerekli
+- `.NET SDK` ile birlikte gelmez, ayrı kurulması gerekir
+
+**Not:** Linux sistemlerde (Fedora) `DOTNET_ROOT` environment variable'ı gerekebilir.
+
+### Dependency Injection ve Scope
+
+**Scope Nedir?**
+- Dependency Injection container'ında servislerin yaşam süresini yönetmek için kullanılan bir kavram
+- `Scoped`: Her HTTP request'te yeni bir instance oluşturulur
+- `DbContext` genellikle Scoped olarak kayıt edilir
+
+**Neden Manuel Scope Oluşturuyoruz?**
+- Uygulama başlangıcında HTTP request yoktur
+- `DbContext` bir scoped service olduğu için, manuel scope oluşturmak gerekir
+- `using (var scope = app.Services.CreateScope())` → Scope oluştur
+- İş bitince scope dispose olur, kaynaklar temizlenir
+
+**Örnek:**
+```csharp
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+    // DbContext kullan
+} // Scope dispose olur, DbContext de dispose olur
 ```
 
 ---
