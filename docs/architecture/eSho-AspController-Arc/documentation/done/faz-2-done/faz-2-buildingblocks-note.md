@@ -1,6 +1,10 @@
-# Faz 2.1 - BuildingBlocks.Exceptions Notları
+# Faz 2 - BuildingBlocks Notları
 
-> Bu dosya, Faz 2.1 (BuildingBlocks.Exceptions) adım adım yaparken öğrendiklerimi not aldığım dosyadır.
+> Bu dosya, Faz 2 (BuildingBlocks) adım adım yaparken öğrendiklerimi not aldığım dosyadır.
+> 
+> **İçerik:**
+> - Faz 2.1: BuildingBlocks.Exceptions (Exception handling)
+> - Faz 2.2: BuildingBlocks.Behaviors (MediatR Pipeline Behaviors)
 
 ---
 
@@ -16,8 +20,9 @@
 ### Bu Bölümde:
 
 **BuildingBlocks.Exceptions** → Exception handling (hata yönetimi)
+**BuildingBlocks.Behaviors** → MediatR Pipeline Behaviors (Validation, Logging)
 
-> **Not:** 2.2 (BuildingBlocks.Behaviors) ve 2.3 (BuildingBlocks.Messaging) henüz yapılmadı. Yapıldığında ayrı dokümantasyon eklenecek.
+> **Not:** 2.3 (BuildingBlocks.Messaging) henüz yapılmadı. Yapıldığında ayrı dokümantasyon eklenecek.
 
 ---
 
@@ -689,6 +694,455 @@ app.UseExceptionHandler();
 8. Exception loglanır, ProblemDetails oluşturulur, response döndürülür
 
 **Detaylı açıklama için:** `learned-faz-2/exception-handling-akisi.md` dosyasına bak.
+
+---
+
+## 2.2 BuildingBlocks.Behaviors - Yapılanlar
+
+**Hedef:** MediatR Pipeline Behaviors (Validation, Logging)
+
+### Adım 1: Class Library Projesi Oluştur
+
+**Komut:**
+```bash
+cd src/BuildingBlocks
+dotnet new classlib -n BuildingBlocks.Behaviors
+```
+
+**Açıklamalar:**
+- `cd src/BuildingBlocks` → BuildingBlocks klasörüne geç
+- `dotnet new classlib` → Yeni class library projesi oluştur
+- `-n BuildingBlocks.Behaviors` → Proje adı
+
+**Ne işe yarar:**
+- MediatR pipeline behaviors için class library projesi oluşturur
+- Validation ve Logging behavior'ları bu projede olacak
+- Diğer servisler bu projeyi referans edecek
+- Class library = çalıştırılabilir değil, sadece kod içerir (kütüphane)
+
+**Sonuç:** 
+- `src/BuildingBlocks/BuildingBlocks.Behaviors/` klasörü oluşturuldu
+- `BuildingBlocks.Behaviors.csproj` dosyası oluşturuldu
+- Varsayılan `Class1.cs` dosyası oluşturuldu (sonra silinecek)
+
+---
+
+### Adım 2: Projeyi Solution'a Ekle
+
+**Komut:**
+```bash
+cd ../..
+dotnet sln add src/BuildingBlocks/BuildingBlocks.Behaviors/BuildingBlocks.Behaviors.csproj
+```
+
+**Açıklamalar:**
+- `cd ../..` → Proje root dizinine dön (2 seviye yukarı)
+- `dotnet sln add` → Solution'a proje ekle
+- `src/BuildingBlocks/BuildingBlocks.Behaviors/BuildingBlocks.Behaviors.csproj` → Eklenecek proje dosyasının yolu
+
+**Ne işe yarar:**
+- Projeyi solution'a ekler
+- `dotnet sln list` ile görülebilir
+- Diğer projeler bu projeyi referans edebilir
+- IDE'lerde (VS Code, Visual Studio) solution içinde görünür
+
+**Kontrol:**
+```bash
+dotnet sln list
+```
+
+**Beklenen çıktı:**
+```
+Project(s)
+----------
+src/BuildingBlocks/BuildingBlocks.Exceptions/BuildingBlocks.Exceptions.csproj
+src/BuildingBlocks/BuildingBlocks.Behaviors/BuildingBlocks.Behaviors.csproj
+```
+
+**Sonuç:** ✅ Proje solution'a eklendi
+
+---
+
+### Adım 3: NuGet Paketlerini Ekle
+
+**Komutlar:**
+```bash
+cd src/BuildingBlocks/BuildingBlocks.Behaviors
+dotnet add package MediatR
+dotnet add package FluentValidation
+dotnet add package FluentValidation.DependencyInjectionExtensions
+dotnet add package Serilog.AspNetCore
+```
+
+**Açıklamalar:**
+- `cd src/BuildingBlocks/BuildingBlocks.Behaviors` → Proje klasörüne geç
+- `dotnet add package` → NuGet paketi ekle
+- Her paket ayrı ayrı eklenir
+- Paketler `Directory.Packages.props` dosyasına merkezi paket yönetimi ile eklenir
+
+**Neden bu paketler?**
+1. **MediatR** → Pipeline behavior pattern'i için gerekli
+2. **FluentValidation** → Request validation için
+3. **FluentValidation.DependencyInjectionExtensions** → FluentValidation'ı DI container'a entegre etmek için
+4. **Serilog.AspNetCore** → Structured logging için
+
+**Paketler ve Görevleri:**
+
+#### 1. `MediatR` (14.0.0)
+**Ne işe yarar:**
+- MediatR pipeline mekanizmasını sağlar
+- `IPipelineBehavior<TRequest, TResponse>` interface'ini içerir
+- Request/Response pipeline'ını yönetir
+- Handler pattern'i için aracı (mediator) görevi görür
+
+**Neden gerekli?**
+- ValidationBehavior ve LoggingBehavior, MediatR pipeline'ında çalışır
+- Tüm request'ler pipeline'dan geçer, behavior'lar bu sırada çalışır
+
+#### 2. `FluentValidation` (12.1.1)
+**Ne işe yarar:**
+- Fluent API ile validation kuralları yazmayı sağlar
+- Validation logic'i merkezi hale getirir
+- ValidationBehavior'da kullanılacak
+
+**Neden gerekli?**
+- ValidationBehavior, FluentValidation kullanarak request'leri doğrular
+- Her request için validator yazılır, ValidationBehavior otomatik çalıştırır
+
+#### 3. `FluentValidation.DependencyInjectionExtensions` (12.1.1)
+**Ne işe yarar:**
+- FluentValidation'ı DI container'a entegre eder
+- `AddValidatorsFromAssembly()` gibi extension metodlarını sağlar
+- ValidationBehavior'da validator'ları bulmak için gerekli
+
+**Neden gerekli?**
+- ValidationBehavior, DI container'dan validator'ları alır
+- Bu paket olmadan validator'lar DI container'a kaydedilemez
+
+#### 4. `Serilog.AspNetCore` (10.0.0)
+**Ne işe yarar:**
+- Structured logging (yapılandırılmış loglama) sağlar
+- ASP.NET Core entegrasyonu içerir
+- LoggingBehavior'da kullanılacak
+
+**Neden gerekli?**
+- LoggingBehavior, Serilog kullanarak request/response'ları loglar
+- Structured logging sayesinde loglar kolay analiz edilir
+
+**Sonuç:** ✅ Tüm paketler eklendi, `Directory.Packages.props` dosyasına merkezi paket yönetimi ile eklendi
+
+---
+
+### Adım 4: Klasör Yapısını Oluştur
+
+**Komut:**
+```bash
+mkdir Behaviors
+```
+
+**Açıklamalar:**
+- `mkdir Behaviors` → Behavior class'ları için klasör
+
+**Neden bu klasör?**
+1. **Kod organizasyonu:** İlgili dosyalar bir arada tutulur
+2. **Okunabilirlik:** Proje yapısı anlaşılır olur
+3. **Bakım kolaylığı:** İlgili dosyaları bulmak kolaylaşır
+4. **Namespace yapısı:** Klasör yapısı namespace yapısını yansıtır
+
+**Ne işe yarar:**
+- `Behaviors/` → MediatR pipeline behavior'ları için
+  - `ValidationBehavior.cs` → Request validation behavior'ı
+  - `LoggingBehavior.cs` → Request/Response logging behavior'ı
+
+**Klasör Yapısı:**
+```
+BuildingBlocks.Behaviors/
+├── Behaviors/
+│   ├── ValidationBehavior.cs
+│   └── LoggingBehavior.cs
+└── BuildingBlocks.Behaviors.csproj
+```
+
+**Namespace Yapısı:**
+- `BuildingBlocks.Behaviors.Behaviors` → Behavior class'ları
+
+**Sonuç:** ✅ Klasör yapısı oluşturuldu
+
+---
+
+### Adım 5: ValidationBehavior Oluştur
+
+**Ne yapacağız:** MediatR pipeline'ında tüm request'leri otomatik olarak FluentValidation ile doğrulayan bir behavior oluşturacağız.
+
+**Neden ValidationBehavior?**
+1. **Merkezi validation:** Tüm request'ler otomatik doğrulanır
+2. **Kod tekrarı önlenir:** Her handler'da validation yazmaya gerek yok
+3. **Tutarlılık:** Tüm servislerde aynı validation mekanizması
+4. **Hata yönetimi:** Validation hataları standart format ile döner
+
+**Oluşturulacak Dosya:**
+- `Behaviors/ValidationBehavior.cs`
+
+**Ne işe yarar:**
+- `IPipelineBehavior<TRequest, TResponse>` interface'ini implement eder
+- MediatR pipeline'ında çalışır
+- Her request handler'dan önce çalışır
+- Request'i FluentValidation ile doğrular
+- Validation hatası varsa `ValidationException` fırlatır
+- Validation başarılıysa handler'a devam eder (`await next()`)
+
+**Kod Yapısı:**
+- Generic class: `ValidationBehavior<TRequest, TResponse>`
+- `IEnumerable<IValidator<TRequest>>` → DI container'dan validator'ları alır
+- `Handle()` metodu → Pipeline'da çalışır
+- FluentValidation kullanarak request'i doğrular
+- Hata varsa `ValidationException` fırlatır
+
+**Akış:**
+```
+Request geldi
+  ↓
+ValidationBehavior çalışır
+  ↓
+FluentValidation ile doğrula
+  ↓
+Hata var mı?
+  ├─ Evet → ValidationException fırlat (handler'a gitmez)
+  └─ Hayır → Handler'a devam et (await next())
+```
+
+**Kullanılan Sınıflar:**
+- `IPipelineBehavior<TRequest, TResponse>` → MediatR pipeline interface'i
+- `IValidator<TRequest>` → FluentValidation validator interface'i
+- `ValidationContext<TRequest>` → FluentValidation validation context
+- `ValidationException` → FluentValidation'ın exception'ı
+
+**Neden ValidationBehavior var?**
+- Tüm request'lerin otomatik doğrulanması için
+- Handler'larda validation kodu yazmaya gerek kalmaz
+- Merkezi validation yönetimi sağlar
+- Validation hataları standart format ile döner
+
+**Sonuç:** ✅ ValidationBehavior oluşturuldu
+
+---
+
+### Adım 6: LoggingBehavior Oluştur
+
+**Ne yapacağız:** MediatR pipeline'ında tüm request/response'ları otomatik loglayan bir behavior oluşturacağız.
+
+**Neden LoggingBehavior?**
+1. **Merkezi logging:** Tüm request/response'lar otomatik loglanır
+2. **Kod tekrarı önlenir:** Her handler'da logging yazmaya gerek yok
+3. **Tutarlılık:** Tüm servislerde aynı logging formatı
+4. **Debug kolaylığı:** Tüm request'lerin logları tek yerde
+5. **Monitoring:** Production'da request/response takibi için
+
+**Oluşturulacak Dosya:**
+- `Behaviors/LoggingBehavior.cs`
+
+**Ne işe yarar:**
+- `IPipelineBehavior<TRequest, TResponse>` interface'ini implement eder
+- MediatR pipeline'ında çalışır
+- Handler'dan önce request'i loglar
+- Handler'dan sonra response'u loglar
+- Serilog kullanarak structured logging yapar
+- Tüm MediatR request'lerini otomatik loglar
+
+**Kod Yapısı:**
+- Generic class: `LoggingBehavior<TRequest, TResponse>`
+- `ILogger<LoggingBehavior<TRequest, TResponse>>` → DI container'dan logger alır
+- `Handle()` metodu → Pipeline'da çalışır
+- Request'i handler'dan önce loglar
+- Response'u handler'dan sonra loglar
+
+**Akış:**
+```
+Request geldi
+  ↓
+LoggingBehavior çalışır
+  ↓
+"Handling {RequestName}: {@Request}" loglanır
+  ↓
+Handler çalışır (await next())
+  ↓
+"Handled {RequestName}: {@Response}" loglanır
+  ↓
+Response döner
+```
+
+**Kullanılan Sınıflar:**
+- `IPipelineBehavior<TRequest, TResponse>` → MediatR pipeline interface'i
+- `ILogger<T>` → Microsoft.Extensions.Logging logger interface'i
+- `typeof(TRequest).Name` → Request tipinin adını alır
+- `{@Request}` ve `{@Response}` → Structured logging için object serialization
+
+**Log Örneği:**
+```
+[INFO] Handling CreateProductCommand: {"Name": "iPhone 15", "Price": 35000, ...}
+[INFO] Handled CreateProductCommand: {"Id": "guid", "Name": "iPhone 15", ...}
+```
+
+**Neden LoggingBehavior var?**
+- Tüm request/response'ların otomatik loglanması için
+- Handler'larda logging kodu yazmaya gerek kalmaz
+- Merkezi logging yönetimi sağlar
+- Production'da request takibi için
+- Debug ve monitoring için faydalıdır
+
+**Sonuç:** ✅ LoggingBehavior oluşturuldu
+
+---
+
+### 2.2 Bölümü - Tamamlanan Kontroller
+
+✅ BuildingBlocks.Behaviors projesi oluşturuldu
+✅ Proje solution'a eklendi
+✅ NuGet paketleri eklendi (MediatR, FluentValidation, FluentValidation.DependencyInjectionExtensions, Serilog.AspNetCore)
+✅ Klasör yapısı oluşturuldu (Behaviors/)
+✅ ValidationBehavior oluşturuldu
+✅ LoggingBehavior oluşturuldu
+✅ Proje build oluyor mu? (`dotnet build`) → ✅ Başarılı
+✅ Solution'da görünüyor mu? (`dotnet sln list`) → ✅ Görünüyor
+
+---
+
+## Öğrenilenler (Faz 2.2)
+
+### MediatR Pipeline Behavior Nedir?
+
+**Pipeline Behavior** = MediatR request/response pipeline'ında çalışan ara katmanlar
+
+**Neden gerekli?**
+- Cross-cutting concerns (validation, logging, caching, vb.) için
+- Handler'larda bu kodları yazmaya gerek kalmaz
+- Merkezi yönetim sağlar
+- Kod tekrarı önlenir
+
+**Nasıl çalışır?**
+```
+Request → Behavior 1 → Behavior 2 → Handler → Response
+         (Logging)   (Validation)   (İş Mantığı)
+```
+
+**Pipeline Sırası:**
+1. LoggingBehavior (request'i logla)
+2. ValidationBehavior (request'i doğrula)
+3. Handler (iş mantığını çalıştır)
+4. LoggingBehavior (response'u logla)
+
+### IPipelineBehavior Interface'i
+
+**IPipelineBehavior** = MediatR pipeline behavior interface'i
+
+**Ne işe yarar:**
+- Pipeline'da çalışan behavior'lar için standart interface
+- `Handle()` metodu ile request/response'u işler
+- `next()` delegate'i ile bir sonraki adıma geçer
+
+**Interface Signature:**
+```csharp
+public interface IPipelineBehavior<TRequest, TResponse>
+{
+    Task<TResponse> Handle(
+        TRequest request,
+        RequestHandlerDelegate<TResponse> next,
+        CancellationToken cancellationToken);
+}
+```
+
+**Parametreler:**
+- `TRequest` → Request tipi
+- `TResponse` → Response tipi
+- `request` → Gelen request
+- `next` → Bir sonraki adıma geçmek için delegate
+- `cancellationToken` → İptal desteği
+
+**Return:**
+- `Task<TResponse>` → Response döner
+
+**Kullanım:**
+```csharp
+public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
+{
+    public async Task<TResponse> Handle(
+        TRequest request,
+        RequestHandlerDelegate<TResponse> next,
+        CancellationToken cancellationToken)
+    {
+        // Validation yap
+        // Hata varsa exception fırlat
+        // Hata yoksa handler'a devam et
+        return await next();
+    }
+}
+```
+
+### FluentValidation Nedir?
+
+**FluentValidation** = Fluent API ile validation kuralları yazmayı sağlayan kütüphane
+
+**Neden FluentValidation?**
+1. **Okunabilirlik:** Validation kuralları açık ve anlaşılır
+2. **Test edilebilirlik:** Validation logic'i kolay test edilir
+3. **Merkezi yönetim:** Validation kuralları tek yerde
+4. **Hata mesajları:** Detaylı ve özelleştirilebilir hata mesajları
+
+**Örnek Validator:**
+```csharp
+public class CreateProductCommandValidator : AbstractValidator<CreateProductCommand>
+{
+    public CreateProductCommandValidator()
+    {
+        RuleFor(x => x.Name)
+            .NotEmpty().WithMessage("Product name is required")
+            .MaximumLength(100).WithMessage("Product name must not exceed 100 characters");
+        
+        RuleFor(x => x.Price)
+            .GreaterThan(0).WithMessage("Price must be greater than 0");
+    }
+}
+```
+
+**ValidationBehavior ile Kullanım:**
+- ValidationBehavior, DI container'dan validator'ları alır
+- Request'i validator'larla doğrular
+- Hata varsa `ValidationException` fırlatır
+- Handler'a gitmez, kullanıcıya hata döner
+
+### Structured Logging Nedir?
+
+**Structured Logging** = Logları yapılandırılmış formatta (JSON) kaydetme
+
+**Neden Structured Logging?**
+1. **Analiz kolaylığı:** Loglar kolay analiz edilir
+2. **Arama:** Belirli alanlara göre arama yapılabilir
+3. **Monitoring:** Log aggregation tool'ları ile entegre edilir
+4. **Debug:** Production'da sorun tespiti kolaylaşır
+
+**Serilog ile Örnek:**
+```csharp
+_logger.LogInformation("Handling {RequestName}: {@Request}", requestName, request);
+```
+
+**Çıktı:**
+```json
+{
+  "Timestamp": "2024-12-15T10:30:00Z",
+  "Level": "Information",
+  "Message": "Handling CreateProductCommand",
+  "RequestName": "CreateProductCommand",
+  "Request": {
+    "Name": "iPhone 15",
+    "Price": 35000
+  }
+}
+```
+
+**LoggingBehavior ile Kullanım:**
+- LoggingBehavior, tüm request/response'ları structured format ile loglar
+- `{@Request}` ve `{@Response}` → Object serialization için
+- Handler'larda logging kodu yazmaya gerek kalmaz
 
 ---
 
