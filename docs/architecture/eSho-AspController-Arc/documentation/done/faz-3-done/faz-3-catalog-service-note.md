@@ -5,6 +5,7 @@
 > **İçerik:**
 > - Faz 3.1: Catalog.API Projesi Oluştur
 > - Faz 3.2: Catalog Database & Seed Data
+> - Faz 3.3: Catalog CQRS - Products Commands
 
 ---
 
@@ -994,6 +995,924 @@ using (var scope = app.Services.CreateScope())
     // DbContext kullan
 } // Scope dispose olur, DbContext de dispose olur
 ```
+
+---
+
+## 3.3 Catalog CQRS - Products Commands - Yapılanlar
+
+**Hedef:** Product yazma işlemleri (Create, Update, Delete) için CQRS pattern ile Command'lar oluşturmak
+
+---
+
+### Adım 1: CreateProductCommand Oluştur
+
+**Dosya:**
+- `Features/Products/Commands/CreateProduct/CreateProductCommand.cs`
+
+**Ne yapıldı:**
+- Yeni ürün oluşturma komutunu tanımlayan class oluşturuldu
+- MediatR'ın `IRequest<Guid>` interface'ini implement etti
+
+**Kod:**
+```csharp
+using MediatR;
+
+namespace Catalog.API.Features.Products.Commands.CreateProduct;
+
+public class CreateProductCommand : IRequest<Guid>
+{
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public decimal Price { get; set; }
+    public string? ImageUrl { get; set; }
+    public Guid CategoryId { get; set; }
+}
+```
+
+**Ne işe yarar:**
+- API'den gelen verileri alır (Name, Description, Price, vb.)
+- MediatR'a "yeni ürün oluştur" komutunu iletir
+- Handler'ın işleyeceği veri modelini tanımlar
+
+**Neden gerekli?**
+- CQRS pattern'inde Command, veriyi değiştiren işlemler için kullanılır
+- MediatR pattern'i için gerekli: Command → Handler → İşlem
+
+**Özellikler:**
+- `IRequest<Guid>` → Handler Guid (Product ID) dönecek
+- Property'ler Entity ile aynı (Id hariç, çünkü veritabanı oluşturacak)
+
+**Sonuç:** ✅ CreateProductCommand oluşturuldu
+
+---
+
+### Adım 2: CreateProductHandler Oluştur
+
+**Dosya:**
+- `Features/Products/Commands/CreateProduct/CreateProductHandler.cs`
+
+**Ne yapıldı:**
+- `CreateProductCommand`'i işleyen Handler class'ı oluşturuldu
+- MediatR'ın `IRequestHandler<CreateProductCommand, Guid>` interface'ini implement etti
+
+**Kod:**
+```csharp
+using MediatR;
+using AutoMapper;
+using Catalog.API.Data;
+using Catalog.API.Entities;
+
+namespace Catalog.API.Features.Products.Commands.CreateProduct;
+
+public class CreateProductHandler : IRequestHandler<CreateProductCommand, Guid>
+{
+    private readonly CatalogDbContext _context;
+    private readonly IMapper _mapper;
+
+    public CreateProductHandler(CatalogDbContext context, IMapper mapper)
+    {
+        _context = context;
+        _mapper = mapper;
+    }
+
+    public async Task<Guid> Handle(CreateProductCommand request, CancellationToken cancellationToken)
+    {
+        // 1. Command'den Entity oluştur
+        var product = _mapper.Map<Product>(request);
+        product.Id = Guid.NewGuid();
+
+        // 2. Veritabanına ekle
+        _context.Products.Add(product);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        // 3. ID döndür
+        return product.Id;
+    }
+}
+```
+
+**Ne işe yarar:**
+- `CreateProductCommand`'i alır
+- Command'deki verileri `Product` entity'sine dönüştürür (AutoMapper ile)
+- Veritabanına kaydeder
+- Product ID döner (Guid)
+
+**Neden gerekli?**
+- MediatR pattern'inde Command oluşturulur, Handler işler
+- İş mantığı Handler'da toplanır (Controller'dan ayrılır)
+
+**Dependency Injection:**
+- `CatalogDbContext` → Veritabanı işlemleri için
+- `IMapper` → AutoMapper, Command → Entity mapping için
+
+**Akış:**
+1. Controller command'i MediatR'a gönderir
+2. MediatR `CreateProductHandler`'ı bulur
+3. Handler'ın `Handle` metodu çağrılır
+4. Command → Entity dönüşümü yapılır
+5. Veritabanına kaydedilir
+6. Product ID döner
+
+**Sonuç:** ✅ CreateProductHandler oluşturuldu
+
+---
+
+### Adım 3: CreateProductValidator Oluştur
+
+**Dosya:**
+- `Features/Products/Commands/CreateProduct/CreateProductValidator.cs`
+
+**Ne yapıldı:**
+- `CreateProductCommand` için validation kurallarını tanımlayan class oluşturuldu
+- FluentValidation'ın `AbstractValidator<CreateProductCommand>` class'ını inherit etti
+
+**Kod:**
+```csharp
+using FluentValidation;
+
+namespace Catalog.API.Features.Products.Commands.CreateProduct;
+
+public class CreateProductValidator : AbstractValidator<CreateProductCommand>
+{
+    public CreateProductValidator()
+    {
+        RuleFor(x => x.Name)
+            .NotEmpty().WithMessage("Ürün adı boş olamaz")
+            .MaximumLength(100).WithMessage("Ürün adı en fazla 100 karakter olabilir");
+
+        RuleFor(x => x.Price)
+            .GreaterThan(0).WithMessage("Fiyat 0'dan büyük olmalı");
+
+        RuleFor(x => x.CategoryId)
+            .NotEmpty().WithMessage("Kategori seçilmeli");
+    }
+}
+```
+
+**Ne işe yarar:**
+- `CreateProductCommand` için validation kuralları tanımlar
+- FluentValidation ile veri doğrulama yapar
+- Hatalı veri gelirse `ValidationException` fırlatır (ValidationBehavior sayesinde)
+
+**Neden gerekli?**
+- Gelen verinin doğruluğunu kontrol etmek için
+- Geçersiz veriyi engellemek, hata mesajları göstermek için
+
+**Validation Kuralları:**
+- `Name`: Boş olamaz, max 100 karakter
+- `Price`: 0'dan büyük olmalı
+- `CategoryId`: Boş olamaz (Guid.Empty olamaz)
+
+**Nasıl Çalışır?**
+- MediatR pipeline'ında `ValidationBehavior` otomatik çalışır
+- `ValidationBehavior`, `CreateProductValidator`'ı bulur ve çalıştırır
+- Hata varsa `ValidationException` fırlatılır, Handler'a gitmez
+- Hata yoksa Handler çalışır
+
+**Sonuç:** ✅ CreateProductValidator oluşturuldu
+
+---
+
+### Adım 4: UpdateProductCommand Oluştur
+
+**Dosya:**
+- `Features/Products/Commands/UpdateProduct/UpdateProductCommand.cs`
+
+**Ne yapıldı:**
+- Mevcut ürünü güncelleme komutunu tanımlayan class oluşturuldu
+- MediatR'ın `IRequest<Unit>` interface'ini implement etti
+
+**Kod:**
+```csharp
+using MediatR;
+
+namespace Catalog.API.Features.Products.Commands.UpdateProduct;
+
+public class UpdateProductCommand : IRequest<Unit>
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public decimal Price { get; set; }
+    public string? ImageUrl { get; set; }
+    public Guid CategoryId { get; set; }
+}
+```
+
+**Ne işe yarar:**
+- Mevcut ürünü güncelleme komutunu tanımlar
+- CreateProductCommand'e benzer, ancak `Id` içerir (hangi ürün güncellenecek)
+
+**CreateProductCommand ile farkları:**
+- `IRequest<Unit>` → `IRequest<Guid>` yerine (hiçbir şey dönmez)
+- `Id` property'si var → Hangi ürün güncellenecek
+
+**Neden Unit?**
+- Update işlemi başarılı olduğunda değer döndürmeye gerek yok
+- `Unit` = "hiçbir şey" anlamına gelir (void gibi, ama generic constraint'ler için gerekli)
+
+**Sonuç:** ✅ UpdateProductCommand oluşturuldu
+
+---
+
+### Adım 5: UpdateProductHandler Oluştur
+
+**Dosya:**
+- `Features/Products/Commands/UpdateProduct/UpdateProductHandler.cs`
+
+**Ne yapıldı:**
+- `UpdateProductCommand`'i işleyen Handler class'ı oluşturuldu
+- MediatR'ın `IRequestHandler<UpdateProductCommand, Unit>` interface'ini implement etti
+
+**Kod:**
+```csharp
+using MediatR;
+using AutoMapper;
+using Catalog.API.Data;
+using Catalog.API.Entities;
+using BuildingBlocks.Exceptions.Exceptions;
+
+namespace Catalog.API.Features.Products.Commands.UpdateProduct;
+
+public class UpdateProductHandler : IRequestHandler<UpdateProductCommand, Unit>
+{
+    private readonly CatalogDbContext _context;
+    private readonly IMapper _mapper;
+
+    public UpdateProductHandler(CatalogDbContext context, IMapper mapper)
+    {
+        _context = context;
+        _mapper = mapper;
+    }
+
+    public async Task<Unit> Handle(UpdateProductCommand request, CancellationToken cancellationToken)
+    {
+        // 1. Ürünü bul
+        var product = await _context.Products.FindAsync(request.Id, cancellationToken);
+        
+        if (product == null)
+            throw new NotFoundException(nameof(Product), request.Id);
+
+        // 2. Command'den Entity'yi güncelle (AutoMapper ile)
+        _mapper.Map(request, product);
+
+        // 3. Değişiklikleri kaydet
+        await _context.SaveChangesAsync(cancellationToken);
+
+        // 4. Unit döndür (hiçbir şey dönmez)
+        return Unit.Value;
+    }
+}
+```
+
+**Ne işe yarar:**
+- `UpdateProductCommand`'i alır
+- Ürünü veritabanından bulur (Id ile)
+- Ürün yoksa `NotFoundException` fırlatır
+- AutoMapper ile Command → Entity mapping yapar (mevcut entity'yi günceller)
+- Veritabanına kaydeder
+- Hiçbir şey dönmez (`Unit`)
+
+**CreateProductHandler ile farkları:**
+- `IRequestHandler<UpdateProductCommand, Unit>` → `Unit` döner
+- `FindAsync(request.Id)` → Ürünü bulur
+- `NotFoundException` → Ürün yoksa fırlatır
+- `_mapper.Map(request, product)` → Mevcut entity'yi günceller (yeni oluşturmaz)
+- `Unit.Value` → Hiçbir şey döner
+
+**Önemli:**
+- `_mapper.Map(request, product)` → Mevcut entity'ye property'leri kopyalar (Id hariç)
+- `SaveChangesAsync()` → EF Core değişiklikleri algılar ve günceller
+
+**Sonuç:** ✅ UpdateProductHandler oluşturuldu
+
+---
+
+### Adım 6: UpdateProductValidator Oluştur
+
+**Dosya:**
+- `Features/Products/Commands/UpdateProduct/UpdateProductValidator.cs`
+
+**Ne yapıldı:**
+- `UpdateProductCommand` için validation kurallarını tanımlayan class oluşturuldu
+- FluentValidation'ın `AbstractValidator<UpdateProductCommand>` class'ını inherit etti
+
+**Kod:**
+```csharp
+using FluentValidation;
+
+namespace Catalog.API.Features.Products.Commands.UpdateProduct;
+
+public class UpdateProductValidator : AbstractValidator<UpdateProductCommand>
+{
+    public UpdateProductValidator()
+    {
+        RuleFor(x => x.Id)
+            .NotEmpty().WithMessage("Ürün ID'si boş olamaz");
+
+        RuleFor(x => x.Name)
+            .NotEmpty().WithMessage("Ürün adı boş olamaz")
+            .MaximumLength(100).WithMessage("Ürün adı en fazla 100 karakter olabilir");
+
+        RuleFor(x => x.Price)
+            .GreaterThan(0).WithMessage("Fiyat 0'dan büyük olmalı");
+
+        RuleFor(x => x.CategoryId)
+            .NotEmpty().WithMessage("Kategori seçilmeli");
+    }
+}
+```
+
+**Ne işe yarar:**
+- `UpdateProductCommand` için validation kuralları tanımlar
+- CreateProductValidator ile benzer kurallar + `Id` kontrolü
+
+**CreateProductValidator ile farkı:**
+- `Id` kuralı eklendi (Update'te hangi ürün güncelleneceği için gerekli)
+- Diğer kurallar aynı (Name, Price, CategoryId)
+
+**Neden Id kontrolü gerekli?**
+- Update işleminde hangi ürün güncelleneceğini bilmek için Id zorunlu
+- Guid.Empty kontrolü yapılır
+
+**Sonuç:** ✅ UpdateProductValidator oluşturuldu
+
+---
+
+### Adım 7: DeleteProductCommand Oluştur
+
+**Dosya:**
+- `Features/Products/Commands/DeleteProduct/DeleteProductCommand.cs`
+
+**Ne yapıldı:**
+- Ürün silme komutunu tanımlayan class oluşturuldu
+- MediatR'ın `IRequest<Unit>` interface'ini implement etti
+
+**Kod:**
+```csharp
+using MediatR;
+
+namespace Catalog.API.Features.Products.Commands.DeleteProduct;
+
+public class DeleteProductCommand : IRequest<Unit>
+{
+    public Guid Id { get; set; }
+}
+```
+
+**Ne işe yarar:**
+- Ürün silme komutunu tanımlar
+- Sadece `Id` property'si içerir (hangi ürün silinecek)
+
+**Neden bu kadar basit?**
+- Silme işlemi için sadece ID yeterli
+- Diğer bilgilere gerek yok
+
+**Özellikler:**
+- `IRequest<Unit>` → Hiçbir şey dönmez (void gibi)
+- Sadece `Id` property'si → Hangi ürün silinecek
+- En basit command (sadece ID gerekiyor)
+
+**Sonuç:** ✅ DeleteProductCommand oluşturuldu
+
+---
+
+### Adım 8: DeleteProductHandler Oluştur
+
+**Dosya:**
+- `Features/Products/Commands/DeleteProduct/DeleteProductHandler.cs`
+
+**Ne yapıldı:**
+- `DeleteProductCommand`'i işleyen Handler class'ı oluşturuldu
+- MediatR'ın `IRequestHandler<DeleteProductCommand, Unit>` interface'ini implement etti
+
+**Kod:**
+```csharp
+using MediatR;
+using Catalog.API.Data;
+using Catalog.API.Entities;
+using BuildingBlocks.Exceptions.Exceptions;
+
+namespace Catalog.API.Features.Products.Commands.DeleteProduct;
+
+public class DeleteProductHandler : IRequestHandler<DeleteProductCommand, Unit>
+{
+    private readonly CatalogDbContext _context;
+
+    public DeleteProductHandler(CatalogDbContext context)
+    {
+        _context = context;
+    }
+
+    public async Task<Unit> Handle(DeleteProductCommand request, CancellationToken cancellationToken)
+    {
+        // 1. Ürünü bul
+        var product = await _context.Products.FindAsync(request.Id, cancellationToken);
+        
+        if (product == null)
+            throw new NotFoundException(nameof(Product), request.Id);
+
+        // 2. Ürünü sil
+        _context.Products.Remove(product);
+
+        // 3. Değişiklikleri kaydet
+        await _context.SaveChangesAsync(cancellationToken);
+
+        // 4. Unit döndür (hiçbir şey dönmez)
+        return Unit.Value;
+    }
+}
+```
+
+**Ne işe yarar:**
+- `DeleteProductCommand`'i alır
+- Ürünü veritabanından bulur (Id ile)
+- Ürün yoksa `NotFoundException` fırlatır
+- `Remove` ile siler
+- Veritabanına kaydeder
+- Hiçbir şey dönmez (`Unit`)
+
+**Neden IMapper yok?**
+- Delete işleminde mapping'e gerek yok
+- Sadece silme işlemi yapılır
+
+**Remove vs Delete:**
+- `_context.Products.Remove(product)` → Entity'yi context'ten kaldırır
+- `SaveChangesAsync()` → Veritabanından siler
+- EF Core'da `Remove` kullanılır (DELETE SQL'i oluşturur)
+
+**Sonuç:** ✅ DeleteProductHandler oluşturuldu
+
+---
+
+### Adım 9: AutoMapper Profile Oluştur
+
+**Dosya:**
+- `Mapping/MappingProfile.cs`
+
+**Ne yapıldı:**
+- AutoMapper için Profile class'ı oluşturuldu
+- Command → Entity mapping'leri tanımlandı
+
+**Kod:**
+```csharp
+using AutoMapper;
+using Catalog.API.Entities;
+using Catalog.API.Features.Products.Commands.CreateProduct;
+using Catalog.API.Features.Products.Commands.UpdateProduct;
+
+namespace Catalog.API.Mapping;
+
+public class MappingProfile : Profile
+{
+    public MappingProfile()
+    {
+        // Command → Entity
+        CreateMap<CreateProductCommand, Product>();
+        CreateMap<UpdateProductCommand, Product>();
+        
+        // Entity → DTO (DTO'lar henüz oluşturulmadı, Faz 3.4'te eklenecek)
+        // CreateMap<Product, ProductDto>();
+    }
+}
+```
+
+**Ne işe yarar:**
+- Command ↔ Entity mapping'lerini tanımlar
+- AutoMapper'ın nasıl dönüşüm yapacağını belirtir
+
+**Neden gerekli?**
+- Manuel dönüşüm kod yazmak yerine AutoMapper otomatik yapar
+- Kod tekrarını önler
+- Mapping kuralları tek yerde toplanır
+
+**Mapping Kuralları:**
+- `CreateProductCommand` → `Product`: Property adları aynı olduğu için otomatik mapping yapılır
+- `UpdateProductCommand` → `Product`: Aynı şekilde otomatik mapping
+
+**Önemli Not:**
+- Entity → DTO mapping'leri henüz eklenmedi (DTO'lar Faz 3.4'te oluşturulacak)
+- Faz 3.4'te ProductDto oluşturulunca mapping eklenecek
+
+**Sonuç:** ✅ AutoMapper Profile oluşturuldu
+
+---
+
+## 3.3 Bölümü - Tamamlanan Kontroller
+
+✅ CreateProductCommand oluşturuldu
+✅ CreateProductHandler oluşturuldu
+✅ CreateProductValidator oluşturuldu
+✅ UpdateProductCommand oluşturuldu
+✅ UpdateProductHandler oluşturuldu
+✅ UpdateProductValidator oluşturuldu
+✅ DeleteProductCommand oluşturuldu
+✅ DeleteProductHandler oluşturuldu
+✅ AutoMapper Profile oluşturuldu (Command → Entity mapping'leri)
+✅ Proje build oluyor mu? (`dotnet build`) → ✅ Başarıyla build oluyor (0 uyarı, 0 hata)
+
+---
+
+## Öğrenilenler (Faz 3.3)
+
+### MediatR ve IRequest<TResponse>
+
+**MediatR Nedir?**
+- Controller ile Handler arasında aracı görevi gören kütüphane
+- Command/Query'leri Handler'lara yönlendirir
+- Pipeline behavior'lar eklenebilir (Validation, Logging)
+- In-process messaging pattern uygular (aynı process içinde mesajlaşma)
+
+**IRequest<TResponse> Nedir ve Nasıl Çalışır?**
+
+`IRequest<TResponse>`, MediatR'da Command/Query'leri temsil eden bir marker interface'dir (boş interface).
+
+```csharp
+// MediatR içindeki tanım (basitleştirilmiş)
+public interface IRequest<out TResponse> : IBaseRequest
+{
+    // Boş! Sadece bir işaretçi
+}
+```
+
+**Nasıl Kullanılır?**
+```csharp
+// Command tanımı
+public class CreateProductCommand : IRequest<Guid>
+{
+    // IRequest<Guid> → Bu command'in handler'ı Guid dönecek
+    // Guid = Product ID
+}
+```
+
+**TResponse Parametresi:**
+- `TResponse`: Handler'ın döneceği tipi belirtir
+- `IRequest<Guid>` → Handler `Task<Guid>` döner
+- `IRequest<Unit>` → Handler `Task<Unit>` döner (hiçbir şey dönmez)
+- `IRequest<ProductDto>` → Handler `Task<ProductDto>` döner
+
+**Neden TResponse Gerekli?**
+- Generic constraint'ler için gerekli
+- Handler'ın return type'ını belirlemek için
+- Type safety sağlar (compile-time kontrol)
+
+**IRequestHandler<TRequest, TResponse> Nedir ve Nasıl Çalışır?**
+
+`IRequestHandler<TRequest, TResponse>`, MediatR'da Handler'ları temsil eden interface'dir.
+
+```csharp
+// MediatR içindeki tanım (basitleştirilmiş)
+public interface IRequestHandler<in TRequest, TResponse>
+    where TRequest : IRequest<TResponse>
+{
+    Task<TResponse> Handle(TRequest request, CancellationToken cancellationToken);
+}
+```
+
+**Nasıl Kullanılır?**
+```csharp
+// Handler tanımı
+public class CreateProductHandler : IRequestHandler<CreateProductCommand, Guid>
+//                                                              ↑         ↑
+//                                                         TRequest   TResponse
+{
+    public async Task<Guid> Handle(CreateProductCommand request, CancellationToken cancellationToken)
+    //                ↑
+    //         Return type = Guid (TResponse'den geliyor)
+    {
+        // İş mantığı
+        return productId;  // Guid döndürüyor
+    }
+}
+```
+
+**Generic Constraint:**
+```csharp
+where TRequest : IRequest<TResponse>
+```
+- `TRequest` mutlaka `IRequest<TResponse>` implement etmeli
+- Bu sayede type safety sağlanır
+- Örnek: `CreateProductCommand : IRequest<Guid>` → `TRequest` = `CreateProductCommand`, `TResponse` = `Guid`
+
+**MediatR Nasıl Eşleştirme Yapar?**
+
+1. **Command/Query gönderilir:**
+```csharp
+await _mediator.Send(new CreateProductCommand { ... });
+```
+
+2. **MediatR Handler'ı bulur:**
+   - `CreateProductCommand` tipini alır
+   - `IRequestHandler<CreateProductCommand, Guid>` tipindeki handler'ı arar
+   - DI container'dan `CreateProductHandler` instance'ını alır
+
+3. **Handler çalıştırılır:**
+   - `CreateProductHandler.Handle()` metodu çağrılır
+   - Command parametre olarak geçilir
+   - Handler iş mantığını çalıştırır
+   - `Task<Guid>` döner (TResponse tipinde)
+
+**Akış Diyagramı (Detaylı):**
+
+**1. Controller - Command Gönderimi**
+- **Dosya:** `Controllers/ProductsController.cs` (örnek)
+- **Kod:** `await _mediator.Send(new CreateProductCommand { ... })`
+- **IMediator:** DI container'dan constructor injection ile alındı
+
+**2. MediatR - Handler ve Behavior'ları Bulma**
+- **Command tipi:** `CreateProductCommand : IRequest<Guid>`
+- **Handler bulma:** DI Container'dan `IRequestHandler<CreateProductCommand, Guid>` → `CreateProductHandler` (Scoped)
+- **Behavior'lar:** DI Container'dan `IPipelineBehavior<CreateProductCommand, Guid>[]`
+  - `LoggingBehavior<CreateProductCommand, Guid>` (varsa)
+  - `ValidationBehavior<CreateProductCommand, Guid>`
+- **Sıra:** Program.cs'de eklendiği sıraya göre
+
+**3. Pipeline Behaviors (Sırayla Çalışır)**
+
+**3.1 LoggingBehavior** (varsa)
+- **Dosya:** `BuildingBlocks.Behaviors/Behaviors/LoggingBehavior.cs`
+- **İşlem:** Request loglanır → `next()` çağrılır (ValidationBehavior'a geçer)
+
+**3.2 ValidationBehavior**
+- **Dosya:** `BuildingBlocks.Behaviors/Behaviors/ValidationBehavior.cs`
+- **Validator bulma:** DI Container'dan `IValidator<CreateProductCommand>[]` → `[CreateProductValidator]`
+- **Validator dosyası:** `Features/.../CreateProduct/CreateProductValidator.cs`
+- **İşlem:** 
+  - `CreateProductValidator.ValidateAsync()` çağrılır
+  - FluentValidation kuralları kontrol edilir
+  - Hata varsa → `ValidationException` fırlatılır (Handler'a gitmez)
+  - Hata yoksa → `next()` çağrılır (CreateProductHandler'a geçer)
+
+**4. CreateProductHandler - İş Mantığı**
+- **Dosya:** `Features/Products/Commands/CreateProduct/CreateProductHandler.cs`
+- **DI Container'dan (constructor):**
+  - `CatalogDbContext _context` (Scoped)
+  - `IMapper _mapper` (Singleton)
+- **İşlemler:**
+  1. AutoMapper ile mapping: `_mapper.Map<Product>(request)`
+     - MappingProfile: `Mapping/MappingProfile.cs` → `CreateMap<CreateProductCommand, Product>()`
+  2. Entity oluşturulur: `product.Id = Guid.NewGuid()`
+  3. Veritabanına eklenir: `_context.Products.Add(product)` (EF Core Added state)
+  4. Kaydedilir: `await _context.SaveChangesAsync()` (PostgreSQL INSERT SQL)
+  5. Product ID döndürülür: `return product.Id` (Guid)
+
+**5. Response Geri Dönüş (Ters Sırada)**
+```
+Guid (Product ID)
+    ↓
+ValidationBehavior.next() → Guid (pipeline devam eder)
+    ↓
+LoggingBehavior.next() → Guid (response loglanır)
+    ↓
+MediatR.Send() → Guid
+    ↓
+ProductsController.CreateProduct() → Guid alır
+    ↓
+HTTP 201 Created Response (Location: /api/products/{id})
+```
+
+**DI Container Kayıtları (Program.cs - Faz 3.6'da eklenecek):**
+
+**Handler'lar:**
+```csharp
+builder.Services.AddMediatR(cfg => {
+    cfg.RegisterServicesFromAssembly(typeof(Program).Assembly);
+});
+// → CreateProductHandler : IRequestHandler<CreateProductCommand, Guid> (Scoped)
+```
+
+**Pipeline Behavior'lar:**
+```csharp
+builder.Services.AddMediatR(cfg => {
+    cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
+    cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+});
+// → Pipeline'a sırayla eklenir
+```
+
+**Validator'lar:**
+```csharp
+builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
+// → CreateProductValidator : AbstractValidator<CreateProductCommand>
+// → IValidator<CreateProductCommand> olarak kaydedilir (Scoped)
+```
+
+**DbContext:**
+```csharp
+builder.Services.AddDbContext<CatalogDbContext>(...);
+// → Scoped lifetime
+```
+
+**AutoMapper:**
+```csharp
+builder.Services.AddAutoMapper(typeof(Program).Assembly);
+// → MappingProfile otomatik bulunur ve kaydedilir (Singleton)
+```
+
+**Örnek Senaryo:**
+
+```csharp
+// 1. Command tanımı
+public class CreateProductCommand : IRequest<Guid>
+{
+    public string Name { get; set; }
+    // IRequest<Guid> → Handler Guid dönecek
+}
+
+// 2. Handler tanımı
+public class CreateProductHandler : IRequestHandler<CreateProductCommand, Guid>
+{
+    // IRequestHandler<CreateProductCommand, Guid>
+    // → CreateProductCommand'i işler, Guid döner
+    
+    public async Task<Guid> Handle(CreateProductCommand request, ...)
+    {
+        // İş mantığı
+        return productId;  // Guid döndürüyor
+    }
+}
+
+// 3. Controller'dan kullanım
+var productId = await _mediator.Send(new CreateProductCommand { Name = "iPhone" });
+//                                                                              ↑
+//                                                                        Guid döner
+```
+
+**IRequest vs IRequestHandler İlişkisi:**
+
+| Bileşen | Rol | Generic Parametre |
+|---------|-----|-------------------|
+| `IRequest<TResponse>` | Command/Query'yi temsil eder (marker interface) | `TResponse`: Handler'ın döneceği tip |
+| `IRequestHandler<TRequest, TResponse>` | Handler'ı temsil eder (iş mantığını içerir) | `TRequest`: İşlenecek Command/Query tipi<br>`TResponse`: Dönecek tip |
+| **Constraint** | `where TRequest : IRequest<TResponse>` | `TRequest` ve `TResponse` eşleşmeli |
+
+**Özet:**
+- `IRequest<TResponse>`: Command/Query tipini tanımlar (sadece bir işaretçi)
+- `IRequestHandler<TRequest, TResponse>`: İş mantığını içerir
+- MediatR, `IRequest<TResponse>` tipine göre doğru `IRequestHandler<TRequest, TResponse>` handler'ını bulur
+- Generic constraint sayesinde type safety sağlanır
+
+### Unit (MediatR)
+
+**Unit Nedir?**
+- MediatR'da "hiçbir şey" anlamına gelir
+- `void` yerine kullanılır (generic constraint'ler için)
+- `IRequest<Unit>` → Handler hiçbir şey dönmez
+- `Unit.Value` → Unit instance'ı döndürülür
+
+**Neden Unit?**
+- C# generic'lerde `void` kullanılamaz
+- `Task<Unit>` → Async metodlar için gerekli
+- Update/Delete gibi işlemlerde değer döndürmeye gerek yok
+
+**Kullanım:**
+```csharp
+public class DeleteProductCommand : IRequest<Unit> { }
+public class DeleteProductHandler : IRequestHandler<DeleteProductCommand, Unit>
+{
+    public async Task<Unit> Handle(...)
+    {
+        // İşlem yap
+        return Unit.Value;  // Hiçbir şey dönmez
+    }
+}
+```
+
+### FluentValidation ve ValidationBehavior İlişkisi
+
+**FluentValidation Nedir?**
+- Validation kurallarını tanımlamak için kullanılan kütüphane
+- `AbstractValidator<T>` class'ını inherit eder
+- `RuleFor` ile kurallar tanımlanır
+
+**ValidationBehavior Nedir?**
+- MediatR pipeline'ında çalışan bir behavior
+- Tüm request'leri otomatik olarak FluentValidation ile doğrular
+- Hata varsa `ValidationException` fırlatır
+
+**Nasıl Çalışır?**
+1. Controller command'i MediatR'a gönderir
+2. ValidationBehavior pipeline'da çalışır
+3. DI container'dan `IValidator<TRequest>` tipindeki validator'ları alır
+4. Her validator'ı çalıştırır (`ValidateAsync()`)
+5. Hata varsa `ValidationException` fırlatır, Handler'a gitmez
+6. Hata yoksa Handler çalışır
+
+**Örnek:**
+```csharp
+// Validator
+public class CreateProductValidator : AbstractValidator<CreateProductCommand>
+{
+    // Kurallar tanımlanır
+}
+
+// ValidationBehavior otomatik bulur ve çalıştırır
+// CreateProductValidator → IValidator<CreateProductCommand> implement ediyor
+// ValidationBehavior → DI container'dan IValidator<CreateProductCommand> alır
+```
+
+### AutoMapper ve Profile
+
+**AutoMapper Nedir?**
+- Object-to-object mapping kütüphanesi
+- Entity ↔ DTO, Command → Entity dönüşümlerini kolaylaştırır
+- Manuel mapping kod yazmaya gerek yok
+
+**Profile Nedir?**
+- AutoMapper mapping kurallarını tanımlayan class
+- `Profile` class'ını inherit eder
+- `CreateMap<TSource, TDestination>()` ile mapping tanımlanır
+
+**Kullanım:**
+```csharp
+public class MappingProfile : Profile
+{
+    public MappingProfile()
+    {
+        CreateMap<CreateProductCommand, Product>();
+        // Property adları aynıysa otomatik mapping yapılır
+    }
+}
+
+// Kullanım
+var product = _mapper.Map<Product>(command);
+```
+
+**Map Metotları:**
+- `Map<TDestination>(source)` → Yeni instance oluşturur
+- `Map(source, destination)` → Mevcut instance'ı günceller (Update için)
+
+### NotFoundException
+
+**NotFoundException Nedir?**
+- BuildingBlocks.Exceptions içinde tanımlı custom exception
+- Varlık bulunamadığında fırlatılır
+- GlobalExceptionHandler yakalar ve 404 Not Found döner
+
+**Kullanım:**
+```csharp
+var product = await _context.Products.FindAsync(id);
+if (product == null)
+    throw new NotFoundException(nameof(Product), id);
+// GlobalExceptionHandler yakalar → 404 Not Found döner
+```
+
+### CQRS Pattern - Command Side
+
+**CQRS Nedir?**
+- Command Query Responsibility Segregation
+- Okuma (Query) ve yazma (Command) işlemlerini ayırma
+- Her işlem için ayrı Handler'lar
+
+**Command Nedir?**
+- Veriyi değiştiren işlemler (Create, Update, Delete)
+- `IRequest<TResponse>` implement eder
+- Handler ile işlenir
+
+**Command Yapısı:**
+```
+CreateProduct/
+  ├── CreateProductCommand.cs      (Command)
+  ├── CreateProductHandler.cs      (Handler)
+  └── CreateProductValidator.cs    (Validator)
+```
+
+**Avantajları:**
+- ✅ Kod organizasyonu: İlgili dosyalar bir arada
+- ✅ Okunabilirlik: Her işlem için açık klasör yapısı
+- ✅ Bakım kolaylığı: Değişiklik yaparken ilgili dosyaları kolay bulma
+- ✅ Test edilebilirlik: Her handler bağımsız test edilebilir
+
+### EF Core - Add, Update, Remove
+
+**Add:**
+```csharp
+var product = new Product { ... };
+_context.Products.Add(product);
+await _context.SaveChangesAsync();
+// INSERT SQL'i çalıştırılır
+```
+
+**Update:**
+```csharp
+var product = await _context.Products.FindAsync(id);
+_mapper.Map(command, product);  // Property'leri güncelle
+await _context.SaveChangesAsync();
+// UPDATE SQL'i çalıştırılır (EF Core değişiklikleri algılar)
+```
+
+**Remove:**
+```csharp
+var product = await _context.Products.FindAsync(id);
+_context.Products.Remove(product);
+await _context.SaveChangesAsync();
+// DELETE SQL'i çalıştırılır
+```
+
+**Önemli:**
+- `SaveChangesAsync()` çağrılmadan değişiklikler veritabanına yazılmaz
+- EF Core Change Tracking sayesinde değişiklikleri algılar
+- `FindAsync()` → Primary key ile arar, hızlıdır
 
 ---
 
