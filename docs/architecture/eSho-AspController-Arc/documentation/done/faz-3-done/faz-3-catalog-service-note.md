@@ -6,6 +6,7 @@
 > - Faz 3.1: Catalog.API Projesi Oluştur
 > - Faz 3.2: Catalog Database & Seed Data
 > - Faz 3.3: Catalog CQRS - Products Commands
+> - Faz 3.4: Catalog CQRS - Products Queries
 
 ---
 
@@ -1913,6 +1914,706 @@ await _context.SaveChangesAsync();
 - `SaveChangesAsync()` çağrılmadan değişiklikler veritabanına yazılmaz
 - EF Core Change Tracking sayesinde değişiklikleri algılar
 - `FindAsync()` → Primary key ile arar, hızlıdır
+
+---
+
+## 3.4 Catalog CQRS - Products Queries - Yapılanlar
+
+**Hedef:** Product okuma işlemleri (GET) için CQRS pattern ile Query'ler oluşturmak
+
+---
+
+### Adım 1: DTO'ları Oluştur
+
+**Dosya Konumları:**
+- `src/Services/Catalog/Catalog.API/Dtos/ProductDto.cs`
+- `src/Services/Catalog/Catalog.API/Dtos/CreateProductDto.cs`
+- `src/Services/Catalog/Catalog.API/Dtos/UpdateProductDto.cs`
+
+**Klasör Yapısı:**
+```
+Catalog.API/
+└── Dtos/                    ← API response/request için DTO'lar
+    ├── ProductDto.cs        ← Entity → API response mapping
+    ├── CreateProductDto.cs  ← Create request için (gelecekte kullanılabilir)
+    └── UpdateProductDto.cs  ← Update request için (gelecekte kullanılabilir)
+```
+
+**Neden `Dtos/` klasöründe?**
+- DTO'lar API katmanına ait olduğu için proje root'una yakın
+- Tüm DTO'lar bir arada, kolay bulunur
+- Entity'lerden (`Entities/`) ayrı, sorumluluklar net
+
+**ProductDto.cs:**
+
+**Namespace:** `Catalog.API.Dtos`
+
+**Kullanılan Kütüphaneler:**
+- ❌ **Harici kütüphane yok** (sadece .NET built-in tipler kullanılıyor)
+
+**Built-in Tipler:**
+- `Guid`: Entity ID'si için (benzersiz tanımlayıcı)
+- `string`: Metin alanları (Name, Description, ImageUrl, CategoryName)
+- `decimal`: Fiyat için (ondalıklı sayı, para birimi için uygun)
+- `string.Empty`: Default değer (null yerine boş string)
+
+**Property'ler:**
+- `Id` (Guid): Ürün ID'si
+- `Name` (string): Ürün adı
+- `Description` (string?): Ürün açıklaması (nullable)
+- `Price` (decimal): Ürün fiyatı
+- `ImageUrl` (string?): Ürün resmi URL'i (nullable)
+- `CategoryId` (Guid): Kategori ID'si (foreign key)
+- `CategoryName` (string): **Ekstra alan** - Navigation property'den (`Product.Category.Name`) alınır
+
+**Ne işe yarar:**
+- **DTO (Data Transfer Object)**: API response'ları için veri transfer nesneleri
+- Entity'lerin doğrudan döndürülmesini engeller
+- API contract'ını kontrol eder (hangi alanlar dönecek)
+
+**Neden gerekli?**
+- **Güvenlik**: Entity'lerin tüm property'lerini kullanıcıya göstermeyiz
+- **Esneklik**: Entity yapısı değişse bile API contract'ı sabit kalır
+- **Ekstra alanlar**: CategoryName gibi navigation property'den gelen alanları ekleyebiliriz
+- **Versioning**: API versiyonlama için farklı DTO'lar kullanılabilir
+
+**CategoryName neden önemli?**
+- Entity'de sadece `CategoryId` var, ama API'de kategori adını da göstermek istiyoruz
+- Navigation property (`Product.Category.Name`) AutoMapper ile DTO'ya aktarılır
+- Bu sayede client tek sorgu ile hem ID hem de ad bilgisini alır
+
+**CreateProductDto.cs ve UpdateProductDto.cs:**
+
+**Namespace:** `Catalog.API.Dtos`
+
+**Kullanılan Kütüphaneler:**
+- ❌ **Harici kütüphane yok** (sadece .NET built-in tipler)
+
+**Ne zaman kullanılacak?**
+- Şu an Command'lar (`CreateProductCommand`, `UpdateProductCommand`) kullanılıyor
+- Gelecekte Controller'larda direkt DTO kullanılırsa bu DTO'lar kullanılabilir
+- Alternatif yaklaşım: Command'lar DTO gibi kullanılıyor (aynı amaç)
+
+**Sonuç:** ✅ DTO'lar oluşturuldu
+
+---
+
+### Adım 2: GetProductsQuery + Handler Oluştur
+
+**Dosya Konumları:**
+- `src/Services/Catalog/Catalog.API/Features/Products/Queries/GetProducts/GetProductsQuery.cs`
+- `src/Services/Catalog/Catalog.API/Features/Products/Queries/GetProducts/GetProductsHandler.cs`
+
+**Klasör Yapısı:**
+```
+Catalog.API/
+└── Features/
+    └── Products/
+        └── Queries/                    ← CQRS Query işlemleri
+            └── GetProducts/            ← "Tüm ürünleri getir" query'si
+                ├── GetProductsQuery.cs      ← Query tanımı
+                └── GetProductsHandler.cs    ← Query işleyici
+```
+
+**Neden `Features/Products/Queries/GetProducts/` klasöründe?**
+- CQRS pattern: Her feature kendi klasöründe (Products, Categories, vb.)
+- Query'ler ayrı klasörde (Commands'tan ayrı)
+- Her query kendi klasöründe (GetProducts, GetProductById, vb.)
+- İlgili dosyalar bir arada, kolay bulunur ve organize
+
+---
+
+**GetProductsQuery.cs:**
+
+**Namespace:** `Catalog.API.Features.Products.Queries.GetProducts`
+
+**Kullanılan Kütüphaneler:**
+- `MediatR`: `IRequest<IEnumerable<ProductDto>>` için
+- `Catalog.API.Dtos`: `ProductDto` tipi için
+
+**MediatR - IRequest<TResponse>:**
+- **Ne işe yarar**: MediatR pattern'i için Query tanımı
+- **IRequest<IEnumerable<ProductDto>>**: Bu query `IEnumerable<ProductDto>` dönecek
+- **Neden gerekli**: MediatR'a "bu query'yi işle" komutunu iletir
+
+**Property'ler:**
+- `PageNumber` (int, default: 1): Hangi sayfa (1'den başlar)
+- `PageSize` (int, default: 10): Sayfa başına kaç kayıt
+- `CategoryId` (Guid?, nullable): Opsiyonel kategori filtresi (null ise tüm ürünler)
+
+**Ne işe yarar:**
+- Tüm ürünleri getirme sorgusunu tanımlar
+- Sayfalama parametreleri içerir
+- Filtreleme parametresi içerir
+
+---
+
+**GetProductsHandler.cs:**
+
+**Namespace:** `Catalog.API.Features.Products.Queries.GetProducts`
+
+**Kullanılan Kütüphaneler:**
+- `MediatR`: `IRequestHandler<GetProductsQuery, IEnumerable<ProductDto>>` için
+- `AutoMapper`: `IMapper` - Entity → DTO mapping için
+- `Microsoft.EntityFrameworkCore`: `Include`, `AsQueryable`, `ToListAsync` için
+- `Catalog.API.Data`: `CatalogDbContext` için
+- `Catalog.API.Dtos`: `ProductDto` tipi için
+
+**Kütüphane Detayları:**
+
+**1. MediatR - IRequestHandler<TRequest, TResponse>:**
+- **Ne işe yarar**: Query'yi işleyen handler interface'i
+- **IRequestHandler<GetProductsQuery, IEnumerable<ProductDto>>**: 
+  - `GetProductsQuery` tipindeki query'yi işler
+  - `IEnumerable<ProductDto>` döner
+- **Neden gerekli**: MediatR pattern'i, iş mantığını handler'da toplar
+
+**2. AutoMapper - IMapper:**
+- **Ne işe yarar**: Entity → DTO dönüşümü
+- **Kullanım**: `_mapper.Map<IEnumerable<ProductDto>>(products)`
+- **Neden gerekli**: Manuel dönüşüm kod yazmaya gerek yok
+- **Mapping Profile**: `Mapping/MappingProfile.cs` içinde tanımlı
+
+**3. Entity Framework Core - Include:**
+- **Ne işe yarar**: Navigation property'leri eager loading ile yükler
+- **Kullanım**: `.Include(p => p.Category)`
+- **Neden gerekli**: CategoryName için `Product.Category.Name`'e erişmek gerekir
+- **SQL Karşılığı**: `LEFT JOIN Categories ON Products.CategoryId = Categories.Id`
+
+**4. Entity Framework Core - AsQueryable:**
+- **Ne işe yarar**: IQueryable döner, sorgu henüz çalıştırılmadı
+- **Kullanım**: `.AsQueryable()` → Koşullu filtreleme yapılabilir
+- **Neden gerekli**: Veritabanında filtreleme/sayfalama yapılır (performans)
+- **Alternatif**: `ToList()` olsaydı, tüm veri memory'ye çekilir, sonra filtreleme yapılırdı (yavaş)
+
+**5. Entity Framework Core - Skip ve Take:**
+- **Skip**: Belirtilen sayıda kaydı atlar (sayfalama için)
+- **Take**: Belirtilen sayıda kayıt alır (sayfa boyutu için)
+- **SQL Karşılığı**: `OFFSET ... ROWS FETCH NEXT ... ROWS ONLY`
+
+**6. Entity Framework Core - ToListAsync:**
+- **Ne işe yarar**: SQL sorgusunu çalıştırır, liste olarak döner
+- **Kullanım**: `.ToListAsync(cancellationToken)`
+- **Neden Async**: Veritabanı I/O işlemi, async/await ile thread blocking önlenir
+
+**7. CatalogDbContext:**
+- **Ne işe yarar**: EF Core DbContext, veritabanı işlemleri için
+- **Kullanım**: `_context.Products` → Products tablosuna erişim
+- **Lifetime**: Scoped (her HTTP request'te yeni instance)
+
+**Handler İşlemleri:**
+1. **Query oluştur**: `_context.Products.Include(p => p.Category).AsQueryable()`
+   - Include ile Category navigation property yüklenir (CategoryName için)
+2. **Filtreleme**: `CategoryId` varsa `Where(p => p.CategoryId == request.CategoryId)`
+3. **Sayfalama**: `Skip((PageNumber - 1) * PageSize).Take(PageSize)`
+4. **SQL çalıştır**: `ToListAsync()` → Veritabanında sorgu çalışır
+5. **Mapping**: AutoMapper ile `Product` → `ProductDto` dönüşümü
+6. **Liste döndür**: `IEnumerable<ProductDto>`
+
+**Önemli Notlar:**
+- **Include**: Navigation property'yi eager loading ile yükler (CategoryName için gerekli)
+- **AsQueryable()**: IQueryable döner, veritabanında filtreleme/sayfalama yapılır (performans)
+- **ToListAsync()**: SQL sorgusu çalıştırılır, liste olarak döner
+- **Sayfalama formülü**: `Skip((pageNumber - 1) * pageSize)` → İlk sayfa için 0, ikinci sayfa için 10, vb.
+
+**Sonuç:** ✅ GetProductsQuery + Handler oluşturuldu
+
+---
+
+### Adım 3: GetProductByIdQuery + Handler Oluştur
+
+**Dosya Konumları:**
+- `src/Services/Catalog/Catalog.API/Features/Products/Queries/GetProductById/GetProductByIdQuery.cs`
+- `src/Services/Catalog/Catalog.API/Features/Products/Queries/GetProductById/GetProductByIdHandler.cs`
+
+**Klasör Yapısı:**
+```
+Catalog.API/
+└── Features/
+    └── Products/
+        └── Queries/
+            └── GetProductById/         ← "ID'ye göre ürün getir" query'si
+                ├── GetProductByIdQuery.cs      ← Query tanımı
+                └── GetProductByIdHandler.cs    ← Query işleyici
+```
+
+**Neden `Features/Products/Queries/GetProductById/` klasöründe?**
+- Her query kendi klasöründe (GetProducts, GetProductById ayrı)
+- İlgili dosyalar bir arada
+- CQRS pattern organizasyonu
+
+---
+
+**GetProductByIdQuery.cs:**
+
+**Namespace:** `Catalog.API.Features.Products.Queries.GetProductById`
+
+**Kullanılan Kütüphaneler:**
+- `MediatR`: `IRequest<ProductDto>` için
+- `Catalog.API.Dtos`: `ProductDto` tipi için
+
+**MediatR - IRequest<TResponse>:**
+- **IRequest<ProductDto>**: Bu query `ProductDto` dönecek (tek nesne, liste değil)
+- GetProductsQuery'den farkı: `IEnumerable<ProductDto>` yerine `ProductDto`
+
+**Property:**
+- `Id` (Guid): Hangi ürün getirilecek
+
+**Ne işe yarar:**
+- ID'ye göre tek ürün getirme sorgusunu tanımlar
+- Ürün detay sayfası için kullanılır
+
+---
+
+**GetProductByIdHandler.cs:**
+
+**Namespace:** `Catalog.API.Features.Products.Queries.GetProductById`
+
+**Kullanılan Kütüphaneler:**
+- `MediatR`: `IRequestHandler<GetProductByIdQuery, ProductDto>` için
+- `AutoMapper`: `IMapper` - Entity → DTO mapping için
+- `Microsoft.EntityFrameworkCore`: `Include`, `FirstOrDefaultAsync` için
+- `Catalog.API.Data`: `CatalogDbContext` için
+- `Catalog.API.Entities`: `Product` entity tipi için (`nameof(Product)` için)
+- `Catalog.API.Dtos`: `ProductDto` tipi için
+- `BuildingBlocks.Exceptions.Exceptions`: `NotFoundException` için
+
+**Kütüphane Detayları:**
+
+**1. Entity Framework Core - FirstOrDefaultAsync:**
+- **Ne işe yarar**: Predicate ile entity arar, bulamazsa null döner
+- **Kullanım**: `.FirstOrDefaultAsync(p => p.Id == request.Id)`
+- **Neden FindAsync değil?**: 
+  - `FindAsync` Include ile çalışmaz (navigation property yüklenmez)
+  - `FirstOrDefaultAsync` Include ile çalışır (CategoryName için gerekli)
+- **SQL**: `SELECT * FROM Products WHERE Id = @id`
+
+**2. BuildingBlocks.Exceptions - NotFoundException:**
+- **Ne işe yarar**: Varlık bulunamadığında fırlatılan custom exception
+- **Kullanım**: `throw new NotFoundException(nameof(Product), request.Id)`
+- **Neden gerekli**: Ürün yoksa 404 Not Found dönmek için
+- **GlobalExceptionHandler**: Exception'ı yakalar, HTTP 404 response döner
+
+**Handler İşlemleri:**
+1. **Ürünü bul**: `FirstOrDefaultAsync(p => p.Id == request.Id)`
+   - Include ile Category navigation property yüklenir
+2. **NotFound kontrolü**: Ürün null ise `NotFoundException` fırlatılır
+3. **Mapping**: AutoMapper ile `Product` → `ProductDto` dönüşümü
+4. **Ürün döndür**: `ProductDto`
+
+**Önemli Notlar:**
+- **FindAsync vs FirstOrDefaultAsync**: 
+  - `FindAsync` Include ile çalışmaz (navigation property yüklenmez)
+  - `FirstOrDefaultAsync` Include ile çalışır (CategoryName için gerekli)
+- **NotFoundException**: BuildingBlocks.Exceptions içinde, GlobalExceptionHandler yakalar → 404 döner
+- **Include zorunlu**: CategoryName için `Product.Category.Name`'e erişmek gerekir
+
+**Sonuç:** ✅ GetProductByIdQuery + Handler oluşturuldu
+
+---
+
+### Adım 4: GetProductsByCategoryQuery + Handler Oluştur
+
+**Dosya Konumları:**
+- `src/Services/Catalog/Catalog.API/Features/Products/Queries/GetProductsByCategory/GetProductsByCategoryQuery.cs`
+- `src/Services/Catalog/Catalog.API/Features/Products/Queries/GetProductsByCategory/GetProductsByCategoryHandler.cs`
+
+**Klasör Yapısı:**
+```
+Catalog.API/
+└── Features/
+    └── Products/
+        └── Queries/
+            └── GetProductsByCategory/  ← "Kategoriye göre ürünleri getir" query'si
+                ├── GetProductsByCategoryQuery.cs      ← Query tanımı
+                └── GetProductsByCategoryHandler.cs    ← Query işleyici
+```
+
+**Neden `Features/Products/Queries/GetProductsByCategory/` klasöründe?**
+- Her query kendi klasöründe (semantik olarak farklı: kategoriye göre filtreleme)
+- GetProductsQuery'den ayrı (CategoryId zorunlu vs opsiyonel)
+
+---
+
+**GetProductsByCategoryQuery.cs:**
+
+**Namespace:** `Catalog.API.Features.Products.Queries.GetProductsByCategory`
+
+**Kullanılan Kütüphaneler:**
+- `MediatR`: `IRequest<IEnumerable<ProductDto>>` için
+- `Catalog.API.Dtos`: `ProductDto` tipi için
+
+**MediatR - IRequest<TResponse>:**
+- **IRequest<IEnumerable<ProductDto>>**: Liste döner (GetProductsQuery ile aynı)
+
+**Property:**
+- `CategoryId` (Guid): **Zorunlu** kategori filtresi (nullable değil)
+
+**Ne işe yarar:**
+- Belirli bir kategoriye ait ürünleri getirme sorgusunu tanımlar
+- Kategori sayfasında o kategorideki ürünleri göstermek için
+
+---
+
+**GetProductsByCategoryHandler.cs:**
+
+**Namespace:** `Catalog.API.Features.Products.Queries.GetProductsByCategory`
+
+**Kullanılan Kütüphaneler:**
+- `MediatR`: `IRequestHandler<GetProductsByCategoryQuery, IEnumerable<ProductDto>>` için
+- `AutoMapper`: `IMapper` - Entity → DTO mapping için
+- `Microsoft.EntityFrameworkCore`: `Include`, `ToListAsync` için
+- `Catalog.API.Data`: `CatalogDbContext` için
+- `Catalog.API.Dtos`: `ProductDto` tipi için
+
+**Handler İşlemleri:**
+1. **Kategoriye ait ürünleri sorgula**: `Where(p => p.CategoryId == request.CategoryId)`
+   - Include ile Category navigation property yüklenir
+   - Sayfalama yok (tüm ürünler getirilir)
+2. **SQL çalıştır**: `ToListAsync()` → Veritabanında sorgu çalışır
+3. **Mapping**: AutoMapper ile `Product` → `ProductDto` dönüşümü
+4. **Liste döndür**: `IEnumerable<ProductDto>`
+
+**GetProductsQuery ile Farkı:**
+- **GetProductsQuery**: 
+  - CategoryId opsiyonel (null ise tüm ürünler)
+  - Sayfalama var (PageNumber, PageSize)
+  - Daha esnek (filtreleme opsiyonel)
+- **GetProductsByCategoryQuery**: 
+  - CategoryId zorunlu (sadece o kategoriye ait ürünler)
+  - Sayfalama yok (tüm ürünler getirilir)
+  - Daha spesifik (semantik olarak "kategoriye göre" anlamı taşır)
+
+**Ne zaman hangisi kullanılır?**
+- **GetProductsQuery**: Genel ürün listesi, sayfalama gerekiyorsa, filtreleme opsiyonelse
+- **GetProductsByCategoryQuery**: Kategori sayfası, o kategorideki tüm ürünleri göstermek için
+
+**Sonuç:** ✅ GetProductsByCategoryQuery + Handler oluşturuldu
+
+---
+
+### Adım 5: AutoMapper Profile Güncelleme
+
+**Dosya Konumu:**
+- `src/Services/Catalog/Catalog.API/Mapping/MappingProfile.cs`
+
+**Klasör Yapısı:**
+```
+Catalog.API/
+└── Mapping/                ← AutoMapper mapping profilleri
+    └── MappingProfile.cs   ← Tüm mapping kuralları burada
+```
+
+**Neden `Mapping/` klasöründe?**
+- Tüm mapping kuralları tek yerde (kolay bulunur ve yönetilir)
+- AutoMapper için standart klasör yapısı
+
+---
+
+**MappingProfile.cs:**
+
+**Namespace:** `Catalog.API.Mapping`
+
+**Kullanılan Kütüphaneler:**
+- `AutoMapper`: `Profile` base class için
+- `Catalog.API.Entities`: `Product` entity tipi için
+- `Catalog.API.Dtos`: `ProductDto` DTO tipi için
+- `Catalog.API.Features.Products.Commands.CreateProduct`: `CreateProductCommand` için
+- `Catalog.API.Features.Products.Commands.UpdateProduct`: `UpdateProductCommand` için
+
+**AutoMapper - Profile:**
+- **Ne işe yarar**: AutoMapper mapping kurallarını tanımlayan base class
+- **Neden gerekli**: Entity ↔ DTO, Command → Entity mapping'leri için
+- **Program.cs'de kayıt**: `AddAutoMapper(typeof(Program).Assembly)` ile otomatik bulunur
+
+**Eklenen Mapping:**
+```csharp
+CreateMap<Product, ProductDto>()
+    .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => 
+        src.Category != null ? src.Category.Name : string.Empty));
+```
+
+**Mapping Kuralları:**
+
+**1. Product → ProductDto (Otomatik Mapping):**
+- Property adları aynıysa otomatik map edilir:
+  - `Id` → `Id`
+  - `Name` → `Name`
+  - `Description` → `Description`
+  - `Price` → `Price`
+  - `ImageUrl` → `ImageUrl`
+  - `CategoryId` → `CategoryId`
+
+**2. CategoryName (ForMember ile Manuel Mapping):**
+- **ForMember**: Özel mapping kuralı tanımlar
+- **dest**: Hedef property (`ProductDto.CategoryName`)
+- **opt.MapFrom**: Kaynak değer (`Product.Category.Name`)
+- **Null kontrolü**: `src.Category != null ? src.Category.Name : string.Empty`
+  - Category null ise boş string döner
+  - Category yüklüyse Category.Name döner
+
+**Ne işe yarar:**
+- Entity → DTO dönüşümü için AutoMapper kuralları
+- CategoryName: Navigation property'den (`Product.Category.Name`) alınır
+- Null kontrolü: Category null ise boş string döner
+
+**Neden ForMember?**
+- Property adları farklı: `Product.Category.Name` (nested) → `ProductDto.CategoryName` (flat)
+- Otomatik mapping çalışmaz, manuel mapping gerekli
+
+**Önemli Notlar:**
+- **Include zorunlu**: Handler'larda mutlaka `Include(p => p.Category)` kullanılmalı
+- Include kullanılmazsa `Product.Category` null olur → CategoryName boş string döner
+- Mapping sadece Include ile yüklenmiş navigation property'leri kullanabilir
+
+**Mevcut Mapping'ler (Faz 3.3'ten):**
+- `CreateProductCommand` → `Product` (Command → Entity)
+- `UpdateProductCommand` → `Product` (Command → Entity)
+
+**Sonuç:** ✅ AutoMapper Profile güncellendi
+
+---
+
+## 3.4 Bölümü - Tamamlanan Kontroller
+
+✅ ProductDto oluşturuldu (CategoryName dahil)
+✅ CreateProductDto oluşturuldu
+✅ UpdateProductDto oluşturuldu
+✅ GetProductsQuery + Handler oluşturuldu (sayfalama + filtreleme)
+✅ GetProductByIdQuery + Handler oluşturuldu (NotFoundException ile)
+✅ GetProductsByCategoryQuery + Handler oluşturuldu
+✅ AutoMapper Profile güncellendi (Product → ProductDto, CategoryName mapping)
+✅ Proje build oluyor mu? (`dotnet build`) → ✅ Başarıyla build oluyor (0 uyarı, 0 hata)
+
+---
+
+## Öğrenilenler (Faz 3.4)
+
+### DTO (Data Transfer Object)
+
+**DTO Nedir?**
+- API response/request için kullanılan veri transfer nesneleri
+- Entity'lerin doğrudan döndürülmesini engeller
+- API contract'ını tanımlar
+
+**Neden Kullanılır?**
+- **Güvenlik**: Entity'nin tüm property'leri API'de görünmez
+- **Esneklik**: Entity değişse bile API contract'ı sabit kalır
+- **Ekstra alanlar**: Navigation property'den gelen alanlar eklenebilir (CategoryName)
+- **Versioning**: Farklı API versiyonları için farklı DTO'lar kullanılabilir
+
+**Entity vs DTO:**
+- **Entity**: Veritabanı tablosunu temsil eder (iç yapı)
+- **DTO**: API response/request formatını temsil eder (dış yapı)
+
+**Örnek:**
+```csharp
+// Entity
+public class Product 
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; }
+    public Category? Category { get; set; }  // Navigation property
+}
+
+// DTO
+public class ProductDto 
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; }
+    public string CategoryName { get; set; }  // Navigation property'den alınır
+}
+```
+
+### EF Core Include (Eager Loading)
+
+**Include Nedir?**
+- Navigation property'leri eager loading ile yükler
+- İlişkili entity'leri tek sorguda getirir
+- JOIN SQL'i oluşturur
+
+**Neden Gerekli?**
+- CategoryName için `Product.Category.Name`'e erişmek gerekir
+- Include kullanılmazsa `Category` null olur (lazy loading aktif değilse)
+
+**Kullanım:**
+```csharp
+var products = await _context.Products
+    .Include(p => p.Category)  // Category navigation property yüklenir
+    .ToListAsync();
+```
+
+**SQL Karşılığı:**
+```sql
+SELECT p.*, c.*
+FROM Products p
+LEFT JOIN Categories c ON p.CategoryId = c.Id
+```
+
+**Önemli:**
+- Include sadece IQueryable üzerinde çalışır
+- ToListAsync() çağrılmadan önce Include eklenmelidir
+- FindAsync ile Include kullanılamaz (FirstOrDefaultAsync kullanılmalı)
+
+### EF Core Query Methods
+
+**AsQueryable() Nedir?**
+- IQueryable döner (veritabanı sorgusu henüz çalıştırılmadı)
+- Filtreleme/sayfalama veritabanında yapılır (performans)
+
+**ToListAsync() Nedir?**
+- SQL sorgusunu çalıştırır
+- Sonuçları liste olarak döner
+
+**Skip() ve Take() Nedir?**
+- **Skip**: Belirtilen sayıda kaydı atlar (sayfalama için)
+- **Take**: Belirtilen sayıda kayıt alır (sayfa boyutu için)
+- SQL'de `OFFSET` ve `LIMIT` olarak çevrilir
+
+**Sayfalama Formülü:**
+```csharp
+.Skip((pageNumber - 1) * pageSize)  // Önceki sayfadaki kayıtları atla
+.Take(pageSize)                      // Sadece bu sayfadaki kayıtları al
+```
+
+**Örnek:**
+- PageNumber = 2, PageSize = 10
+- Skip(10) → İlk 10 kaydı atla
+- Take(10) → Sonraki 10 kaydı al (11-20 arası)
+
+### FindAsync vs FirstOrDefaultAsync
+
+**FindAsync:**
+- Primary key ile arar (hızlıdır)
+- Include ile çalışmaz (navigation property yüklenmez)
+- Tracking entity döner (Change Tracking aktif)
+
+**FirstOrDefaultAsync:**
+- LINQ predicate ile arar (herhangi bir alan)
+- Include ile çalışır (navigation property yüklenebilir)
+- Tracking entity döner
+
+**Ne Zaman Hangisi Kullanılır?**
+- **FindAsync**: Sadece ID ile arama, Include gerekmez
+- **FirstOrDefaultAsync**: ID ile arama + Include gerekli (CategoryName için)
+
+**Örnek:**
+```csharp
+// Include gerekiyorsa
+var product = await _context.Products
+    .Include(p => p.Category)
+    .FirstOrDefaultAsync(p => p.Id == id);
+
+// Include gerekmiyorsa
+var product = await _context.Products.FindAsync(id);
+```
+
+### AutoMapper ForMember
+
+**ForMember Nedir?**
+- Özel mapping kuralları tanımlamak için kullanılır
+- Property adları farklıysa veya özel dönüşüm gerekiyorsa kullanılır
+
+**Kullanım:**
+```csharp
+CreateMap<Product, ProductDto>()
+    .ForMember(
+        dest => dest.CategoryName,           // Hedef property
+        opt => opt.MapFrom(src =>            // Kaynak değer
+            src.Category != null ? src.Category.Name : string.Empty));
+```
+
+**Ne Zaman Kullanılır?**
+- Property adları farklıysa (CategoryName vs Category.Name)
+- Özel dönüşüm gerekiyorsa (null kontrolü, format, vb.)
+
+**Otomatik Mapping:**
+- Property adları aynıysa otomatik mapping yapılır
+- `CreateMap<Product, ProductDto>()` → Name, Price, vb. otomatik map edilir
+
+### CQRS Pattern - Query Side
+
+**Query Nedir?**
+- Veriyi okuma işlemleri (GET)
+- `IRequest<TResponse>` implement eder
+- Handler ile işlenir
+
+**Query Yapısı:**
+```
+GetProducts/
+  ├── GetProductsQuery.cs      (Query)
+  └── GetProductsHandler.cs     (Handler)
+```
+
+**Command vs Query:**
+- **Command**: Veriyi değiştirir (Create, Update, Delete)
+- **Query**: Veriyi okur (Get, GetAll, GetByFilter)
+
+**Query Avantajları:**
+- ✅ İş mantığı Controller'dan ayrılır
+- ✅ Test edilebilirlik
+- ✅ Kod organizasyonu
+- ✅ MediatR pipeline'ından yararlanır (Validation, Logging)
+
+**Query Handler İşlemleri:**
+1. DbContext'ten veri çekilir
+2. Gerekirse filtreleme/sayfalama uygulanır
+3. Entity → DTO mapping yapılır
+4. DTO döndürülür
+
+### Sayfalama (Pagination)
+
+**Sayfalama Nedir?**
+- Büyük veri setlerini sayfalara bölme
+- Performans için önemli (tüm veriyi çekmek yerine sadece gerekli sayfa)
+
+**Sayfalama Parametreleri:**
+- **PageNumber**: Hangi sayfa (1'den başlar)
+- **PageSize**: Sayfa başına kaç kayıt
+
+**EF Core Sayfalama:**
+```csharp
+.Skip((pageNumber - 1) * pageSize)
+.Take(pageSize)
+```
+
+**SQL Karşılığı:**
+```sql
+SELECT * FROM Products
+OFFSET 10 ROWS
+FETCH NEXT 10 ROWS ONLY
+```
+
+**Avantajları:**
+- ✅ Performans: Sadece gerekli kayıtlar çekilir
+- ✅ Memory: Daha az bellek kullanımı
+- ✅ Network: Daha az veri transferi
+
+### Filtreleme (Filtering)
+
+**Filtreleme Nedir?**
+- Belirli kriterlere göre veri çekme
+- CategoryId, DateRange, vb. ile filtreleme
+
+**EF Core Filtreleme:**
+```csharp
+var query = _context.Products.AsQueryable();
+
+if (categoryId.HasValue)
+{
+    query = query.Where(p => p.CategoryId == categoryId.Value);
+}
+```
+
+**Neden AsQueryable()?**
+- IQueryable döner, sorgu henüz çalıştırılmadı
+- Koşullu filtreleme yapılabilir
+- ToListAsync() çağrılınca SQL sorgusu çalıştırılır
+
+**Avantajları:**
+- ✅ Koşullu filtreleme yapılabilir
+- ✅ Dinamik sorgu oluşturulabilir
+- ✅ Performans: Filtreleme veritabanında yapılır
 
 ---
 

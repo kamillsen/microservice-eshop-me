@@ -1,5 +1,6 @@
 using AutoMapper;
 using Catalog.API.Entities;
+using Catalog.API.Dtos;
 using Catalog.API.Features.Products.Commands.CreateProduct;
 using Catalog.API.Features.Products.Commands.UpdateProduct;
 
@@ -13,8 +14,9 @@ public class MappingProfile : Profile
         CreateMap<CreateProductCommand, Product>();
         CreateMap<UpdateProductCommand, Product>();
         
-        // Entity → DTO (DTO'lar henüz oluşturulmadı, Faz 3.4'te eklenecek)
-        // CreateMap<Product, ProductDto>();
+        // Entity → DTO
+        CreateMap<Product, ProductDto>()
+            .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.Category != null ? src.Category.Name : string.Empty));
     }
 }
 
