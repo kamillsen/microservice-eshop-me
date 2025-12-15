@@ -5,6 +5,7 @@
 > **İçerik:**
 > - Faz 2.1: BuildingBlocks.Exceptions (Exception handling)
 > - Faz 2.2: BuildingBlocks.Behaviors (MediatR Pipeline Behaviors)
+> - Faz 2.3: BuildingBlocks.Messaging (Integration Events)
 
 ---
 
@@ -21,8 +22,7 @@
 
 **BuildingBlocks.Exceptions** → Exception handling (hata yönetimi)
 **BuildingBlocks.Behaviors** → MediatR Pipeline Behaviors (Validation, Logging)
-
-> **Not:** 2.3 (BuildingBlocks.Messaging) henüz yapılmadı. Yapıldığında ayrı dokümantasyon eklenecek.
+**BuildingBlocks.Messaging** → Integration Events (Asenkron mesajlaşma)
 
 ---
 
@@ -1143,6 +1143,739 @@ _logger.LogInformation("Handling {RequestName}: {@Request}", requestName, reques
 - LoggingBehavior, tüm request/response'ları structured format ile loglar
 - `{@Request}` ve `{@Response}` → Object serialization için
 - Handler'larda logging kodu yazmaya gerek kalmaz
+
+---
+
+## 2.3 BuildingBlocks.Messaging - Yapılanlar
+
+**Hedef:** Integration Events (Asenkron mesajlaşma için event yapısı)
+
+### Adım 1: Class Library Projesi Oluştur
+
+**Komut:**
+```bash
+cd src/BuildingBlocks
+dotnet new classlib -n BuildingBlocks.Messaging
+```
+
+**Açıklamalar:**
+- `cd src/BuildingBlocks` → BuildingBlocks klasörüne geç
+- `dotnet new classlib` → Yeni class library projesi oluştur
+- `-n BuildingBlocks.Messaging` → Proje adı
+
+**Ne işe yarar:**
+- Integration events için class library projesi oluşturur
+- Tüm microservice'ler arasındaki async mesajlaşma event'leri bu projede olacak
+- Diğer servisler bu projeyi referans edecek
+- Class library = çalıştırılabilir değil, sadece kod içerir (kütüphane)
+
+**Sonuç:** 
+- `src/BuildingBlocks/BuildingBlocks.Messaging/` klasörü oluşturuldu
+- `BuildingBlocks.Messaging.csproj` dosyası oluşturuldu
+- Varsayılan `Class1.cs` dosyası oluşturuldu (sonra silinecek)
+
+---
+
+### Adım 2: Projeyi Solution'a Ekle
+
+**Komut:**
+```bash
+cd ../..
+dotnet sln add src/BuildingBlocks/BuildingBlocks.Messaging/BuildingBlocks.Messaging.csproj
+```
+
+**Açıklamalar:**
+- `cd ../..` → Proje root dizinine dön (2 seviye yukarı)
+- `dotnet sln add` → Solution'a proje ekle
+- `src/BuildingBlocks/BuildingBlocks.Messaging/BuildingBlocks.Messaging.csproj` → Eklenecek proje dosyasının yolu
+
+**Ne işe yarar:**
+- Projeyi solution'a ekler
+- `dotnet sln list` ile görülebilir
+- Diğer projeler bu projeyi referans edebilir
+- IDE'lerde (VS Code, Visual Studio) solution içinde görünür
+
+**Kontrol:**
+```bash
+dotnet sln list
+```
+
+**Beklenen çıktı:**
+```
+Project(s)
+----------
+src/BuildingBlocks/BuildingBlocks.Exceptions/BuildingBlocks.Exceptions.csproj
+src/BuildingBlocks/BuildingBlocks.Behaviors/BuildingBlocks.Behaviors.csproj
+src/BuildingBlocks/BuildingBlocks.Messaging/BuildingBlocks.Messaging.csproj
+```
+
+**Sonuç:** ✅ Proje solution'a eklendi
+
+---
+
+### Adım 3: NuGet Paketlerini Ekle
+
+**Komutlar:**
+```bash
+cd src/BuildingBlocks/BuildingBlocks.Messaging
+dotnet add package MassTransit
+dotnet add package MassTransit.RabbitMQ
+```
+
+**Açıklamalar:**
+- `cd src/BuildingBlocks/BuildingBlocks.Messaging` → Proje klasörüne geç
+- `dotnet add package` → NuGet paketi ekle
+- Her paket ayrı ayrı eklenir
+- Paketler `Directory.Packages.props` dosyasına merkezi paket yönetimi ile eklenir
+
+**Neden bu paketler?**
+1. **MassTransit** → Message broker abstraction layer (RabbitMQ, Azure Service Bus, vb. için)
+2. **MassTransit.RabbitMQ** → MassTransit'in RabbitMQ implementasyonu
+
+**Paketler ve Görevleri:**
+
+#### 1. `MassTransit` (8.5.7)
+
+**Ne işe yarar:**
+MassTransit, microservice'ler arasında mesaj göndermek/almak için kullanılan bir kütüphanedir. Farklı mesaj broker'ları (RabbitMQ, Azure Service Bus, vb.) ile çalışabilir.
+
+**Teknik Terimler Açıklaması:**
+
+**Message Broker (Mesaj Aracısı) Nedir?**
+- Microservice'ler arasında mesaj göndermek için kullanılan bir sistemdir
+- Posta kutusu gibi düşünebilirsin: Bir servis mesajı bırakır, diğer servis alır
+- Örnek: RabbitMQ, Azure Service Bus, Amazon SQS
+
+**Abstraction Layer (Soyutlama Katmanı) Nedir?**
+- Farklı sistemlerin (RabbitMQ, Azure Service Bus) ortak bir arayüzle kullanılmasını sağlar
+- Kod yazarken hangi broker kullandığını düşünmene gerek kalmaz
+- Örnek: Araba kullanırken motor detaylarını bilmene gerek yok, sadece direksiyonu çevirirsin
+
+**Publish (Yayınlama) Nedir?**
+- Bir mesajı/event'i message broker'a göndermek demektir
+- Örnek: Basket.API, "Sepet ödeme yapıldı" mesajını RabbitMQ'ya gönderir
+
+**Consume (Tüketme) Nedir?**
+- Message broker'dan mesaj/event almak demektir
+- Örnek: Ordering.API, RabbitMQ'dan "Sepet ödeme yapıldı" mesajını alır
+
+**Nasıl Çalışır?**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  MassTransit (Abstraction Layer)                        │
+│  ┌───────────────────────────────────────────────────┐ │
+│  │  Kodunuz:                                         │ │
+│  │  await _publishEndpoint.Publish(event);          │ │
+│  └───────────────────────────────────────────────────┘ │
+│                    ↓                                      │
+│  ┌───────────────────────────────────────────────────┐ │
+│  │  MassTransit, hangi broker kullanıldığını bilir  │ │
+│  │  (RabbitMQ, Azure Service Bus, vb.)              │ │
+│  └───────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
+                    ↓
+        ┌───────────────────────┐
+        │  RabbitMQ Container   │
+        │  (Message Broker)     │
+        └───────────────────────┘
+```
+
+**Neden gerekli?**
+1. **Kolay kullanım:** Mesaj göndermek/almak için basit kod yazarsın
+2. **Broker bağımsızlığı:** Bugün RabbitMQ kullanıyorsan, yarın Azure Service Bus'a geçersen sadece paketi değiştirirsin, kod aynı kalır
+3. **Standart pattern:** .NET dünyasında yaygın kullanılan bir kütüphane
+4. **Test edilebilirlik:** Test için in-memory (bellekte) broker kullanabilirsin
+
+**Örnek Senaryo:**
+```
+Basket.API → "Sepet ödeme yapıldı" event'i oluştur
+           → MassTransit ile RabbitMQ'ya gönder (Publish)
+           → Ordering.API RabbitMQ'dan alır (Consume)
+           → Sipariş oluşturur
+```
+
+---
+
+#### 2. `MassTransit.RabbitMQ` (8.5.7)
+
+**Ne işe yarar:**
+MassTransit.RabbitMQ, MassTransit'in RabbitMQ ile nasıl konuşacağını bilen bir eklentidir. MassTransit tek başına yeterli değildir, hangi broker'ı kullanacağını söylemen gerekir.
+
+**Teknik Terimler Açıklaması:**
+
+**Implementasyon (Uygulama) Nedir?**
+- MassTransit genel bir arayüz sağlar (nasıl mesaj gönderileceğini bilir)
+- MassTransit.RabbitMQ, RabbitMQ'ya özel detayları bilir (RabbitMQ'nun kurallarına göre mesaj gönderir)
+- Örnek: Telefon şarj kablosu genel bir standarttır, ama iPhone için Lightning, Android için USB-C kablosu gerekir
+
+**Nasıl Çalışır?**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Kodunuz (Basket.API)                                   │
+│  await _publishEndpoint.Publish(basketCheckoutEvent);   │
+└───────────────────────┬─────────────────────────────────┘
+                        ↓
+        ┌───────────────────────────────────┐
+        │  MassTransit                      │
+        │  "Mesaj gönder" komutunu alır     │
+        └───────────────┬───────────────────┘
+                        ↓
+        ┌───────────────────────────────────┐
+        │  MassTransit.RabbitMQ             │
+        │  "RabbitMQ'ya nasıl göndereceğim?"│
+        │  RabbitMQ'nun kurallarını bilir   │
+        └───────────────┬───────────────────┘
+                        ↓
+        ┌───────────────────────────────────┐
+        │  RabbitMQ Container               │
+        │  Mesajı alır ve saklar            │
+        └───────────────┬───────────────────┘
+                        ↓
+        ┌───────────────────────────────────┐
+        │  Ordering.API                     │
+        │  Mesajı alır (Consume)            │
+        └───────────────────────────────────┘
+```
+
+**Neden gerekli?**
+1. **MassTransit tek başına yeterli değil:** MassTransit genel bir arayüzdür, hangi broker'ı kullanacağını bilmez
+2. **RabbitMQ'ya özel detaylar:** RabbitMQ'nun kendi kuralları vardır (queue, exchange, routing key, vb.)
+3. **Docker Compose entegrasyonu:** Docker Compose'da RabbitMQ container'ı var, bununla konuşmak için bu paket gerekli
+
+**Örnek:**
+- MassTransit = Genel telefon şarj standardı
+- MassTransit.RabbitMQ = iPhone için Lightning kablosu
+- RabbitMQ = iPhone'un kendisi
+
+**Sonuç:** ✅ Tüm paketler eklendi, `Directory.Packages.props` dosyasına merkezi paket yönetimi ile eklendi
+
+---
+
+### Adım 4: Klasör Yapısını Oluştur
+
+**Komut:**
+```bash
+mkdir Events
+```
+
+**Açıklamalar:**
+- `mkdir Events` → Integration event class'ları için klasör
+
+**Neden bu klasör?**
+1. **Kod organizasyonu:** İlgili dosyalar bir arada tutulur
+2. **Okunabilirlik:** Proje yapısı anlaşılır olur
+3. **Bakım kolaylığı:** İlgili dosyaları bulmak kolaylaşır
+4. **Namespace yapısı:** Klasör yapısı namespace yapısını yansıtır
+
+**Ne işe yarar:**
+- `Events/` → Integration event class'ları için
+  - `IntegrationEvent.cs` → Tüm event'lerin base class'ı
+  - `BasketCheckoutEvent.cs` → Basket → Ordering checkout event'i
+  - İleride başka event'ler de eklenecek
+
+**Klasör Yapısı:**
+```
+BuildingBlocks.Messaging/
+├── Events/
+│   ├── IntegrationEvent.cs
+│   └── BasketCheckoutEvent.cs
+└── BuildingBlocks.Messaging.csproj
+```
+
+**Namespace Yapısı:**
+- `BuildingBlocks.Messaging.Events` → Event class'ları
+
+**Sonuç:** ✅ Klasör yapısı oluşturuldu
+
+---
+
+### Adım 5: IntegrationEvent Base Class Oluştur
+
+**Ne yapacağız:** Tüm integration event'lerin inherit edeceği base class oluşturacağız.
+
+**Neden IntegrationEvent base class?**
+1. **Tutarlılık:** Tüm event'ler aynı yapıya sahip olur
+2. **Ortak property'ler:** Id, CreatedAt gibi ortak alanlar tek yerde
+3. **Tip güvenliği:** Event tipini belirlemek kolaylaşır
+4. **MassTransit entegrasyonu:** MassTransit event'leri tanıyabilir
+
+**Oluşturulacak Dosya:**
+- `Events/IntegrationEvent.cs`
+
+**Ne işe yarar:**
+- Tüm integration event'lerin base class'ı (temel sınıfı)
+- `record` type kullanılır (değiştirilemez, değer eşitliği)
+- `Id` → Her event'in benzersiz kimliği (Guid - Global Unique Identifier)
+- `CreatedAt` → Event'in oluşturulma zamanı (DateTime.UtcNow - UTC zamanı)
+- Tüm event'ler bu class'tan inherit eder (miras alır)
+
+**Kod Yapısı:**
+- `record IntegrationEvent` → Değiştirilemez record tipi
+- `Id` → Guid, otomatik oluşturulur (constructor'da - yapıcı metodda)
+- `CreatedAt` → DateTime, otomatik oluşturulur (constructor'da)
+
+**Teknik Terimler Açıklaması:**
+
+**Record Type Nedir?**
+- C# 9.0 ile gelen özel bir class tipidir
+- Normal class'tan farkı: Değiştirilemez (immutable) ve değer eşitliği (value equality) kullanır
+
+**Immutability (Değiştirilemezlik) Nedir?**
+- Event oluşturulduktan sonra içeriği değiştirilemez
+- Örnek: Bir mektup yazdıktan sonra içeriğini değiştiremezsin, yeni bir mektup yazarsın
+- Neden önemli: Event'ler geçmişte olan olayları temsil eder, geçmiş değiştirilemez
+
+**Value Equality (Değer Eşitliği) Nedir?**
+- İki event'in içeriği aynıysa, eşit kabul edilir
+- Normal class'ta: İki aynı içerikli nesne farklı kabul edilir (referans eşitliği)
+- Record'ta: İki aynı içerikli nesne eşit kabul edilir (değer eşitliği)
+
+**Örnek:**
+```csharp
+// Normal Class (Reference Equality)
+var event1 = new IntegrationEvent { Id = Guid.NewGuid() };
+var event2 = new IntegrationEvent { Id = event1.Id };
+event1 == event2; // false (farklı nesneler)
+
+// Record (Value Equality)
+var event1 = new IntegrationEvent { Id = Guid.NewGuid() };
+var event2 = new IntegrationEvent { Id = event1.Id };
+event1 == event2; // true (aynı değerlere sahip)
+```
+
+**Neden record type?**
+1. **Immutability:** Event'ler geçmişte olan olayları temsil eder, değiştirilemez olmalı
+2. **Value equality:** Aynı içerikli event'ler eşit kabul edilir (test için önemli)
+3. **Serialization:** JSON'a çevirirken kolay (MassTransit event'leri JSON'a çevirir)
+4. **Best practice:** Event'ler için record type önerilir (.NET dünyasında standart)
+
+**Kullanım:**
+```csharp
+public record BasketCheckoutEvent : IntegrationEvent
+{
+    // Event-specific properties
+}
+```
+
+**Sonuç:** ✅ IntegrationEvent base class oluşturuldu
+
+---
+
+### Adım 6: BasketCheckoutEvent Oluştur
+
+**Ne yapacağız:** Basket Service'ten Ordering Service'e gönderilecek checkout event'ini oluşturacağız.
+
+**Neden BasketCheckoutEvent?**
+1. **Async communication:** Basket.API → Ordering.API async mesajlaşma
+2. **Decoupling:** Servisler birbirine direkt bağımlı değil
+3. **Scalability:** Servisler bağımsız scale edilebilir
+4. **Reliability:** Message broker (RabbitMQ) garantili teslimat sağlar
+
+**Oluşturulacak Dosya:**
+- `Events/BasketCheckoutEvent.cs`
+
+**Ne işe yarar:**
+- Basket Service'ten Ordering Service'e gönderilecek checkout event'i
+- Sepet ödeme bilgilerini içerir
+- RabbitMQ üzerinden async olarak gönderilir
+- Ordering Service bu event'i alıp sipariş oluşturur
+
+**Property'ler:**
+
+1. **Kullanıcı Bilgileri:**
+   - `UserName` → Kullanıcı adı
+
+2. **Fiyat:**
+   - `TotalPrice` → Toplam fiyat (decimal)
+
+3. **Shipping Address (Teslimat Adresi):**
+   - `FirstName` → Ad
+   - `LastName` → Soyad
+   - `EmailAddress` → E-posta
+   - `AddressLine` → Adres satırı
+   - `Country` → Ülke
+   - `State` → Eyalet/İl
+   - `ZipCode` → Posta kodu
+
+4. **Payment Info (Ödeme Bilgileri):**
+   - `CardName` → Kart üzerindeki isim
+   - `CardNumber` → Kart numarası
+   - `Expiration` → Son kullanma tarihi
+   - `CVV` → Güvenlik kodu
+   - `PaymentMethod` → Ödeme yöntemi (int)
+
+**Kullanım Senaryosu:**
+```
+1. Kullanıcı sepeti checkout eder (Basket.API)
+2. BasketCheckoutEvent oluşturulur
+3. Event RabbitMQ'ya publish edilir
+4. Ordering.API event'i consume eder
+5. Ordering Service sipariş oluşturur
+```
+
+**Neden bu property'ler?**
+- Sipariş oluşturmak için gerekli tüm bilgileri içerir
+- Shipping address → Siparişin teslimat adresi
+- Payment info → Ödeme işlemi için gerekli bilgiler
+- UserName → Siparişin sahibi
+
+**Sonuç:** ✅ BasketCheckoutEvent oluşturuldu
+
+---
+
+### 2.3 Bölümü - Tamamlanan Kontroller
+
+✅ BuildingBlocks.Messaging projesi oluşturuldu
+✅ Proje solution'a eklendi
+✅ NuGet paketleri eklendi (MassTransit, MassTransit.RabbitMQ)
+✅ Klasör yapısı oluşturuldu (Events/)
+✅ IntegrationEvent base class oluşturuldu
+✅ BasketCheckoutEvent oluşturuldu
+✅ Proje build oluyor mu? (`dotnet build`) → ✅ Başarılı
+✅ Solution'da görünüyor mu? (`dotnet sln list`) → ✅ Görünüyor
+
+---
+
+## Öğrenilenler (Faz 2.3)
+
+### MassTransit Nedir?
+
+**MassTransit** = Message broker'lar için soyutlama katmanı (abstraction layer)
+
+**Basit Açıklama:**
+MassTransit, microservice'ler arasında mesaj göndermek/almak için kullanılan bir kütüphanedir. Farklı mesaj broker'ları (RabbitMQ, Azure Service Bus, vb.) ile çalışabilir.
+
+**Teknik Terimler:**
+
+**Message Broker (Mesaj Aracısı):**
+- Microservice'ler arasında mesaj göndermek için kullanılan sistem
+- Posta kutusu gibi: Bir servis mesajı bırakır, diğer servis alır
+- Örnek: RabbitMQ, Azure Service Bus, Amazon SQS
+
+**Abstraction Layer (Soyutlama Katmanı):**
+- Farklı sistemlerin ortak bir arayüzle kullanılmasını sağlar
+- Kod yazarken hangi broker kullandığını düşünmene gerek yok
+- Örnek: Araba kullanırken motor detaylarını bilmene gerek yok
+
+**Publish (Yayınlama):**
+- Bir mesajı/event'i message broker'a göndermek
+- Örnek: Basket.API, "Sepet ödeme yapıldı" mesajını RabbitMQ'ya gönderir
+
+**Consume (Tüketme):**
+- Message broker'dan mesaj/event almak
+- Örnek: Ordering.API, RabbitMQ'dan "Sepet ödeme yapıldı" mesajını alır
+
+**Neden MassTransit?**
+1. **Broker bağımsızlığı:** Bugün RabbitMQ, yarın Azure Service Bus kullanabilirsin, kod aynı kalır
+2. **Kolay kullanım:** Mesaj göndermek/almak için basit kod yazarsın
+3. **Best practice:** .NET ekosisteminde yaygın kullanılır
+4. **Test edilebilirlik:** Test için in-memory (bellekte) broker kullanabilirsin
+
+**Nasıl Çalışır?**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Kodunuz (Basket.API)                                   │
+│  await _publishEndpoint.Publish(basketCheckoutEvent);  │
+└───────────────────────┬─────────────────────────────────┘
+                        ↓
+        ┌───────────────────────────────────┐
+        │  MassTransit                      │
+        │  "Mesaj gönder" komutunu alır     │
+        │  Hangi broker? → RabbitMQ         │
+        └───────────────┬───────────────────┘
+                        ↓
+        ┌───────────────────────────────────┐
+        │  MassTransit.RabbitMQ             │
+        │  RabbitMQ'ya nasıl göndereceğim? │
+        │  RabbitMQ kurallarını bilir       │
+        └───────────────┬───────────────────┘
+                        ↓
+        ┌───────────────────────────────────┐
+        │  RabbitMQ Container               │
+        │  Mesajı alır ve saklar            │
+        │  (Queue'da bekler)                │
+        └───────────────┬───────────────────┘
+                        ↓
+        ┌───────────────────────────────────┐
+        │  Ordering.API                     │
+        │  Mesajı alır (Consume)            │
+        │  Sipariş oluşturur                 │
+        └───────────────────────────────────┘
+```
+
+**Kullanım Örneği:**
+
+**Event Gönderme (Publish):**
+```csharp
+// Basket.API - CheckoutController.cs
+public async Task<IActionResult> Checkout(BasketCheckoutDto dto)
+{
+    // Event oluştur
+    var checkoutEvent = new BasketCheckoutEvent
+    {
+        UserName = dto.UserName,
+        TotalPrice = dto.TotalPrice,
+        // ... diğer bilgiler
+    };
+    
+    // MassTransit ile RabbitMQ'ya gönder
+    await _publishEndpoint.Publish(checkoutEvent);
+    
+    return Ok();
+}
+```
+
+**Event Alma (Consume):**
+```csharp
+// Ordering.API - BasketCheckoutConsumer.cs
+public class BasketCheckoutConsumer : IConsumer<BasketCheckoutEvent>
+{
+    public async Task Consume(ConsumeContext<BasketCheckoutEvent> context)
+    {
+        var event = context.Message; // Gelen event
+        
+        // Sipariş oluştur
+        var order = new Order
+        {
+            UserName = event.UserName,
+            TotalPrice = event.TotalPrice,
+            // ... diğer bilgiler
+        };
+        
+        await _orderService.CreateOrderAsync(order);
+    }
+}
+```
+
+### Integration Event Pattern Nedir?
+
+**Integration Event** = Microservice'ler arası asenkron mesajlaşma için event yapısı
+
+**Basit Açıklama:**
+Integration Event, bir microservice'in başka bir microservice'e "Bir şey oldu" mesajı göndermesi için kullanılan bir pattern'dir (desen). Mesajlar asenkron olarak gönderilir, yani gönderen servis cevap beklemez.
+
+**Teknik Terimler:**
+
+**Pattern (Desen):**
+- Yazılım geliştirmede sık kullanılan, kanıtlanmış çözüm yöntemleri
+- Örnek: Integration Event Pattern, Repository Pattern, CQRS Pattern
+
+**Async Communication (Asenkron İletişim):**
+- Servisler birbirine mesaj gönderirken beklemez
+- Örnek: E-posta gönderirsin, cevap beklemezsin, işine devam edersin
+- Senkron: Telefon görüşmesi (karşı taraf cevap verene kadar beklersin)
+
+**Decoupling (Ayrıştırma):**
+- Servisler birbirine direkt bağımlı değildir
+- Message broker (RabbitMQ) aracılığıyla konuşurlar
+- Örnek: İki kişi posta kutusu üzerinden konuşur, birbirlerini görmezler
+
+**Scalability (Ölçeklenebilirlik):**
+- Servisler bağımsız olarak büyütülebilir (scale edilebilir)
+- Örnek: Basket.API'yi 3 sunucuda çalıştırabilirsin, Ordering.API'yi 5 sunucuda
+
+**Reliability (Güvenilirlik):**
+- Message broker mesajları garanti eder
+- Mesaj kaybolmaz, teslim edilir
+- Örnek: Posta kutusu mesajı kaybetmez, teslim eder
+
+**Neden Integration Event?**
+1. **Decoupling:** Servisler birbirine direkt bağımlı değil, message broker üzerinden konuşurlar
+2. **Async communication:** Servisler senkron beklemez, işlerine devam ederler
+3. **Scalability:** Servisler bağımsız scale edilebilir
+4. **Reliability:** Message broker garantili teslimat sağlar
+
+**Akış Diagramı:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Senaryo: Kullanıcı sepeti checkout ediyor                  │
+└─────────────────────────────────────────────────────────────┘
+
+1. Kullanıcı Sepeti Checkout Eder
+   ┌──────────────┐
+   │  Basket.API  │
+   │              │
+   │  Checkout()  │
+   └──────┬───────┘
+          │
+          ↓
+2. BasketCheckoutEvent Oluşturulur
+   ┌──────────────────────────────┐
+   │  var event = new              │
+   │  BasketCheckoutEvent {        │
+   │    UserName = "...",          │
+   │    TotalPrice = 1000,         │
+   │    ...                        │
+   │  }                            │
+   └──────┬─────────────────────────┘
+          │
+          ↓
+3. MassTransit ile RabbitMQ'ya Gönderilir (Publish)
+   ┌──────────────┐         ┌──────────────┐
+   │  Basket.API  │─────────→│  RabbitMQ    │
+   │              │ Publish  │  Container   │
+   └──────────────┘          └──────┬───────┘
+                                    │
+                                    │ Mesaj Queue'da bekler
+                                    ↓
+4. Ordering.API Event'i Alır (Consume)
+   ┌──────────────┐         ┌──────────────┐
+   │  Ordering.API│←─────────│  RabbitMQ    │
+   │              │ Consume │  Container   │
+   └──────┬───────┘          └──────────────┘
+          │
+          ↓
+5. Sipariş Oluşturulur
+   ┌──────────────────────────────┐
+   │  var order = new Order {     │
+   │    UserName = event.UserName,│
+   │    TotalPrice = event.Total, │
+   │    ...                       │
+   │  }                           │
+   │  await CreateOrder(order);   │
+   └──────────────────────────────┘
+```
+
+**Senkron vs Asenkron Karşılaştırması:**
+
+**Senkron (Eski Yöntem - Önerilmez):**
+```
+Basket.API → HTTP Request → Ordering.API
+            (Bekler cevabı)
+            ← HTTP Response ←
+```
+- ❌ Basket.API, Ordering.API'nin cevabını bekler
+- ❌ Ordering.API yavaşsa, Basket.API de yavaşlar
+- ❌ Ordering.API çökerse, Basket.API de etkilenir
+
+**Asenkron (Yeni Yöntem - Önerilir):**
+```
+Basket.API → Event → RabbitMQ → Ordering.API
+            (Beklemez, işine devam eder)
+```
+- ✅ Basket.API, Ordering.API'nin cevabını beklemez
+- ✅ Ordering.API yavaşsa, Basket.API etkilenmez
+- ✅ Ordering.API çökerse, mesaj RabbitMQ'da bekler, sonra işlenir
+
+**Gerçek Hayat Örneği:**
+- **Senkron:** Restoranda sipariş verirsin, garson yemeği getirene kadar bekler, sonra ödersin
+- **Asenkron:** Online sipariş verirsin, siparişi gönderirsin, işine devam edersin. Restoran hazır olunca getirir
+
+**Örnek Senaryo:**
+1. Kullanıcı sepeti checkout eder (Basket.API)
+2. `BasketCheckoutEvent` oluşturulur
+3. Event RabbitMQ'ya publish edilir (MassTransit ile)
+4. Ordering.API event'i consume eder
+5. Ordering Service sipariş oluşturur
+6. Kullanıcıya "Siparişiniz alındı" mesajı döner (Basket.API'den)
+
+### Record Type Nedir?
+
+**Record** = Değiştirilemez (immutable) ve değer eşitliği (value equality) kullanan özel bir class tipi
+
+**Basit Açıklama:**
+Record, C# 9.0 ile gelen özel bir class tipidir. Normal class'tan farkı: Oluşturulduktan sonra içeriği değiştirilemez ve aynı değerlere sahip iki record eşit kabul edilir.
+
+**Teknik Terimler:**
+
+**Immutable (Değiştirilemez):**
+- Nesne oluşturulduktan sonra içeriği değiştirilemez
+- Örnek: Bir mektup yazdıktan sonra içeriğini değiştiremezsin, yeni bir mektup yazarsın
+- Neden önemli: Event'ler geçmişte olan olayları temsil eder, geçmiş değiştirilemez
+
+**Value Equality (Değer Eşitliği):**
+- İki nesnenin içeriği aynıysa, eşit kabul edilir
+- Normal class'ta: İki aynı içerikli nesne farklı kabul edilir (referans eşitliği)
+- Record'ta: İki aynı içerikli nesne eşit kabul edilir (değer eşitliği)
+
+**Reference Equality (Referans Eşitliği):**
+- Normal class'ta kullanılır
+- İki nesne aynı bellek adresindeyse eşit kabul edilir
+- İçerik aynı olsa bile, farklı bellek adreslerindeyse eşit değildir
+
+**Neden record type?**
+1. **Immutability:** Event'ler geçmişte olan olayları temsil eder, değiştirilemez olmalı
+2. **Value equality:** Aynı içerikli event'ler eşit kabul edilir (test için önemli)
+3. **Serialization:** JSON'a çevirirken kolay (MassTransit event'leri JSON'a çevirir)
+4. **Best practice:** Event'ler için record type önerilir (.NET dünyasında standart)
+
+**Class vs Record Karşılaştırması:**
+
+**Normal Class (Reference Equality):**
+```csharp
+public class IntegrationEvent
+{
+    public Guid Id { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+var event1 = new IntegrationEvent { Id = Guid.Parse("123...") };
+var event2 = new IntegrationEvent { Id = Guid.Parse("123...") };
+
+event1 == event2; // false (farklı nesneler, farklı bellek adresleri)
+event1.Id == event2.Id; // true (değerler aynı)
+```
+
+**Record (Value Equality):**
+```csharp
+public record IntegrationEvent
+{
+    public Guid Id { get; init; }
+    public DateTime CreatedAt { get; init; }
+}
+
+var event1 = new IntegrationEvent { Id = Guid.Parse("123...") };
+var event2 = new IntegrationEvent { Id = Guid.Parse("123...") };
+
+event1 == event2; // true (aynı değerlere sahip, eşit kabul edilir)
+```
+
+**init Keyword Nedir?**
+- Property'yi sadece constructor'da veya object initializer'da set edebilirsin
+- Sonradan değiştirilemez (immutable)
+- Örnek:
+```csharp
+var event = new IntegrationEvent { Id = Guid.NewGuid() }; // ✅ OK
+event.Id = Guid.NewGuid(); // ❌ HATA! init property değiştirilemez
+```
+
+**Örnek Kullanım:**
+```csharp
+// IntegrationEvent.cs
+public record IntegrationEvent
+{
+    public Guid Id { get; init; } = Guid.NewGuid();
+    public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
+}
+
+// BasketCheckoutEvent.cs
+public record BasketCheckoutEvent : IntegrationEvent
+{
+    public string UserName { get; init; } = default!;
+    public decimal TotalPrice { get; init; }
+    // ... diğer property'ler
+}
+
+// Kullanım
+var checkoutEvent = new BasketCheckoutEvent
+{
+    UserName = "john_doe",
+    TotalPrice = 1000
+    // Id ve CreatedAt otomatik oluşturulur
+};
+
+// Sonradan değiştirilemez
+checkoutEvent.UserName = "new_name"; // ❌ HATA! init property
+```
+
+**Neden Event'ler için Record?**
+- Event'ler geçmişte olan olayları temsil eder, geçmiş değiştirilemez
+- Aynı event'i iki kez işlememek için değer eşitliği önemli
+- JSON serialization için uygun (MassTransit event'leri JSON'a çevirir)
 
 ---
 
