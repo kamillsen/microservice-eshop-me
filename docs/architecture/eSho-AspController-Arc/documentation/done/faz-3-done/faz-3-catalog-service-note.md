@@ -175,14 +175,14 @@ dotnet add package AspNetCore.HealthChecks.NpgSql
 
 **Eklenen Paket Versiyonları (Directory.Packages.props'a eklendi):**
 - `Microsoft.AspNetCore.OpenApi` → 9.0.11
-- `AutoMapper` → 13.0.1
-- `AutoMapper.Extensions.Microsoft.DependencyInjection` → 12.0.1 (13.0.1 yoktu, 12.0.1 kullanıldı)
+- `AutoMapper` → 12.0.1 (13.0.1'den düşürüldü, extension paketi ile uyumluluk için)
+- `AutoMapper.Extensions.Microsoft.DependencyInjection` → 12.0.1
 - `Microsoft.EntityFrameworkCore` → 9.0.0
 - `Microsoft.EntityFrameworkCore.Design` → 9.0.0
 - `Npgsql.EntityFrameworkCore.PostgreSQL` → 9.0.2
-- `AspNetCore.HealthChecks.NpgSql` → 9.0.0 (9.0.1 yoktu, 9.0.0 kullanıldı)
+- `AspNetCore.HealthChecks.NpgSql` → 9.0.0
 
-**Not:** `AutoMapper.Extensions.Microsoft.DependencyInjection 12.0.1`, `AutoMapper 13.0.1` ile uyumluluk uyarısı verdi ama çalışır (genelde sorun çıkarmaz).
+**Not:** İlk olarak `AutoMapper 13.0.1` kullanıldı ancak `AutoMapper.Extensions.Microsoft.DependencyInjection` paketinin en yüksek versiyonu 12.0.1 olduğu için versiyon uyumluluk uyarısı verdi. Uyumluluk için `AutoMapper` de 12.0.1'e düşürüldü.
 
 **Sonuç:** ✅ Tüm paketler eklendi
 
@@ -313,6 +313,155 @@ Catalog.API/
 
 ---
 
+### Adım 6: Entity'leri Oluştur
+
+**Dosyalar:**
+- `Entities/Product.cs`
+- `Entities/Category.cs`
+
+**Ne işe yarar:**
+- **Entity**: Veritabanı tablolarını temsil eden C# class'ları
+- EF Core bu entity'leri kullanarak veritabanı şemasını oluşturur
+- Entity'ler veritabanı tablolarına karşılık gelir
+
+**Neden gerekli?**
+- Veritabanında Products ve Categories tabloları oluşturmak için
+- EF Core'un veritabanı işlemlerini yapabilmesi için entity'lere ihtiyaç var
+- LINQ sorguları entity'ler üzerinden yapılır
+
+**Product Entity Özellikleri:**
+- `Id` (Guid): Benzersiz tanımlayıcı
+- `Name` (string): Ürün adı
+- `Description` (string?): Ürün açıklaması (nullable)
+- `Price` (decimal): Ürün fiyatı
+- `ImageUrl` (string?): Ürün resmi URL'i (nullable)
+- `CategoryId` (Guid): Kategori foreign key
+- `Category` (Category?): Navigation property (ilişkili kategori nesnesine erişim için)
+
+**Category Entity Özellikleri:**
+- `Id` (Guid): Benzersiz tanımlayıcı
+- `Name` (string): Kategori adı
+- `Products` (ICollection<Product>): Navigation property (bu kategoriye ait ürünler)
+
+**Navigation Property Nedir?**
+- İki entity arasındaki ilişkiyi temsil eder
+- Örnek: `Product.Category` → Ürünün hangi kategoriye ait olduğunu gösterir
+- Örnek: `Category.Products` → Kategorideki tüm ürünleri gösterir
+- EF Core bu property'leri kullanarak JOIN sorguları oluşturur
+
+**Sonuç:** ✅ Entity'ler oluşturuldu
+
+---
+
+### Adım 7: CatalogDbContext Oluştur
+
+**Dosya:**
+- `Data/CatalogDbContext.cs`
+
+**Ne işe yarar:**
+- **DbContext**: EF Core'un veritabanıyla konuşmasını sağlayan ana sınıf
+- Veritabanı bağlantısını yönetir
+- Entity konfigürasyonlarını tanımlar
+- LINQ sorgularını SQL'e çevirir
+
+**Neden gerekli?**
+- EF Core'un çalışması için DbContext sınıfı zorunludur
+- Entity'lerin veritabanı tablolarına nasıl dönüşeceğini tanımlar
+- Veritabanı işlemlerini (CRUD) yapmak için gerekli
+
+**CatalogDbContext İçeriği:**
+1. **Constructor**: `DbContextOptions<CatalogDbContext>` alır (DI container'dan gelecek)
+2. **DbSet'ler**: Her entity için bir DbSet tanımlanır
+   - `DbSet<Product> Products` → Products tablosuna erişim
+   - `DbSet<Category> Categories` → Categories tablosuna erişim
+3. **OnModelCreating**: Entity konfigürasyonları
+   - Tablo isimleri
+   - Alan uzunlukları (MaxLength)
+   - Primary key'ler
+   - Foreign key ilişkileri
+   - Veri tipleri (decimal için precision/scale)
+
+**Entity Konfigürasyonları:**
+- **Product**:
+  - Tablo adı: `Products`
+  - `Name`: Zorunlu, max 100 karakter
+  - `Description`: Opsiyonel, max 500 karakter
+  - `Price`: decimal(18,2) - 18 toplam, 2 ondalık basamak
+  - `ImageUrl`: Opsiyonel, max 500 karakter
+  - Foreign Key: `CategoryId` → `Categories.Id`
+  - `OnDelete(DeleteBehavior.Restrict)`: Kategori silinirse, o kategoriye ait ürünler varsa silme işlemi engellenir
+
+- **Category**:
+  - Tablo adı: `Categories`
+  - `Name`: Zorunlu, max 50 karakter
+
+**DeleteBehavior.Restrict Nedir?**
+- Kategori silinmeye çalışıldığında, o kategoriye ait ürünler varsa silme işlemi engellenir
+- Veri bütünlüğünü korur (orphan records oluşmasını önler)
+- Alternatif: `Cascade` (kategori silinirse ürünler de silinir) - bu durumda kullanılmadı
+
+**Sonuç:** ✅ CatalogDbContext oluşturuldu
+
+---
+
+### Adım 8: Connection String Ekle
+
+**Dosya:**
+- `appsettings.json`
+
+**Ne işe yarar:**
+- Uygulamanın veritabanına bağlanması için gerekli bilgileri içerir
+- Host, Port, Database, Username, Password bilgileri
+
+**Neden gerekli?**
+- DbContext'in veritabanına bağlanabilmesi için connection string'e ihtiyacı var
+- `Program.cs`'de `AddDbContext` yaparken connection string kullanılır
+
+**Connection String Formatı:**
+```json
+{
+  "ConnectionStrings": {
+    "Database": "Host=localhost;Port=5432;Database=CatalogDb;Username=postgres;Password=postgres"
+  }
+}
+```
+
+**Connection String Parçaları:**
+- `Host=localhost`: PostgreSQL sunucusunun adresi (Docker container için `catalogdb`, local için `localhost`)
+- `Port=5432`: PostgreSQL'in dinlediği port
+- `Database=CatalogDb`: Veritabanı adı
+- `Username=postgres`: Veritabanı kullanıcı adı
+- `Password=postgres`: Veritabanı şifresi
+
+**Not:** Şu anda `localhost` kullanıldı (development için). Production'da `catalogdb` (Docker container adı) kullanılacak.
+
+**Sonuç:** ✅ Connection string eklendi
+
+---
+
+### Adım 9: AutoMapper Versiyon Düzeltmesi
+
+**Dosya:**
+- `Directory.Packages.props`
+
+**Sorun:**
+- İlk olarak `AutoMapper 13.0.1` kullanıldı
+- Ancak `AutoMapper.Extensions.Microsoft.DependencyInjection` paketinin en yüksek versiyonu 12.0.1
+- Versiyon uyumsuzluğu uyarısı verdi
+
+**Çözüm:**
+- `AutoMapper` versiyonu 12.0.1'e düşürüldü
+- Her iki paket de 12.0.1 versiyonunda uyumlu
+
+**Neden önemli?**
+- Paket uyumluluğu için aynı majör versiyon kullanılmalı
+- Uyarılar build'i engellemese de, çalışma zamanında sorun çıkarabilir
+- Versiyon tutarlılığı best practice
+
+**Sonuç:** ✅ AutoMapper versiyonları uyumlu hale getirildi
+
+---
+
 ## 3.1 Bölümü - Tamamlanan Kontroller
 
 ✅ Catalog.API Web API projesi oluşturuldu
@@ -320,7 +469,11 @@ Catalog.API/
 ✅ NuGet paketleri eklendi (MediatR, FluentValidation, AutoMapper, EF Core, PostgreSQL, HealthChecks)
 ✅ Project References eklendi (BuildingBlocks.Exceptions, BuildingBlocks.Behaviors)
 ✅ Klasör yapısı oluşturuldu (Features, Entities, Data, Dtos, Mapping, Controllers)
-✅ Proje build oluyor mu? (`dotnet build`) → ✅ Kontrol edilecek (henüz entity/handler olmadığı için muhtemelen build olur ama çalışmaz)
+✅ Entity'ler oluşturuldu (Product.cs, Category.cs)
+✅ CatalogDbContext oluşturuldu (entity konfigürasyonları ile)
+✅ Connection string eklendi (appsettings.json)
+✅ AutoMapper versiyon uyumluluğu düzeltildi
+✅ Proje build oluyor mu? (`dotnet build`) → ✅ Başarıyla build oluyor (0 uyarı, 0 hata)
 
 ---
 
@@ -395,6 +548,55 @@ dotnet add reference ../../BuildingBlocks/BuildingBlocks.Exceptions/BuildingBloc
 - ✅ Kod organizasyonu: İlgili dosyalar bir arada
 - ✅ Okunabilirlik: Her işlem için açık klasör yapısı
 - ✅ Bakım kolaylığı: Değişiklik yaparken ilgili dosyaları kolay bulma
+
+### Entity Framework Core ve DbContext
+
+**Entity Framework Core Nedir?**
+- Microsoft'un ORM (Object-Relational Mapping) framework'ü
+- C# class'larını (Entity) veritabanı tablolarına dönüştürür
+- LINQ sorgularını SQL'e çevirir
+- CRUD işlemlerini kolaylaştırır
+
+**Entity Nedir?**
+- Veritabanı tablolarını temsil eden C# class'ları
+- Her entity bir tabloya karşılık gelir
+- Property'ler tablo kolonlarına karşılık gelir
+- Navigation property'ler tablolar arası ilişkileri temsil eder
+
+**DbContext Nedir?**
+- EF Core'un veritabanıyla konuşmasını sağlayan ana sınıf
+- `DbSet<T>` ile entity'lere erişim sağlar
+- `OnModelCreating` ile entity konfigürasyonları yapılır
+- Migration oluşturma ve uygulama için kullanılır
+
+**Navigation Property Nedir?**
+- İki entity arasındaki ilişkiyi temsil eden property
+- Foreign key ile birlikte kullanılır
+- LINQ sorgularında JOIN işlemlerini kolaylaştırır
+- Örnek: `Product.Category` → Ürünün kategori nesnesine erişim
+
+**DeleteBehavior Nedir?**
+- Foreign key ilişkilerinde silme davranışını belirler
+- `Restrict`: İlişkili kayıt varsa silme engellenir (veri bütünlüğü için)
+- `Cascade`: Ana kayıt silinirse ilişkili kayıtlar da silinir
+- `SetNull`: Ana kayıt silinirse foreign key NULL olur
+
+### Connection String
+
+**Connection String Nedir?**
+- Veritabanına bağlanmak için gerekli bilgileri içeren string
+- Host, Port, Database, Username, Password bilgilerini içerir
+- `appsettings.json` veya `appsettings.Development.json` içinde saklanır
+
+**Neden appsettings.json'da?**
+- Güvenlik: Hassas bilgiler environment variable'larda tutulmalı (production)
+- Kolaylık: Development için appsettings.json yeterli
+- Yapılandırma: Farklı ortamlar için farklı dosyalar (Development, Production)
+
+**PostgreSQL Connection String Formatı:**
+```
+Host={host};Port={port};Database={database};Username={user};Password={pass}
+```
 
 ---
 
