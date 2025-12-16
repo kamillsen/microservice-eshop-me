@@ -64,8 +64,6 @@ dotnet new webapi -n Catalog.API
 - `Catalog.API.csproj` dosyası oluşturuldu
 - `Program.cs`, `appsettings.json` gibi temel dosyalar oluşturuldu
 
-**Not:** Proje oluşturulurken `Microsoft.AspNetCore.OpenApi` paketi versiyonlu olarak eklendi. Central Package Management (CPM) kullanıldığı için versiyon `Directory.Packages.props` dosyasına taşındı.
-
 ---
 
 ### Adım 2: Projeyi Solution'a Ekle
@@ -173,13 +171,10 @@ dotnet add package AspNetCore.HealthChecks.NpgSql
 - **AspNetCore.HealthChecks.NpgSql**: PostgreSQL health check için (veritabanı sağlık kontrolü)
 
 **Central Package Management (CPM) Notu:**
-- Proje oluşturulurken `Microsoft.AspNetCore.OpenApi` paketi versiyonlu olarak eklendi
-- CPM aktif olduğu için versiyon `Directory.Packages.props` dosyasına taşındı
-- Tüm paket versiyonları merkezi olarak yönetilir
+- CPM aktif olduğu için tüm paket versiyonları merkezi olarak yönetilir
 - Yeni paket eklendiğinde versiyon `Directory.Packages.props`'a eklenmeli
 
 **Eklenen Paket Versiyonları (Directory.Packages.props'a eklendi):**
-- `Microsoft.AspNetCore.OpenApi` → 9.0.11
 - `AutoMapper` → 12.0.1 (13.0.1'den düşürüldü, extension paketi ile uyumluluk için)
 - `AutoMapper.Extensions.Microsoft.DependencyInjection` → 12.0.1
 - `Microsoft.EntityFrameworkCore` → 9.0.0
@@ -2844,7 +2839,7 @@ if (categoryId.HasValue)
 - `Program.cs`
 
 **Ne yapıldı:**
-- `builder.Services.AddOpenApi();` satırından sonra MediatR servisi eklendi
+- MediatR servisi eklendi
 - Handler'ları otomatik bulmak için `RegisterServicesFromAssembly` kullanıldı
 - Pipeline behavior'lar eklendi (LoggingBehavior, ValidationBehavior)
 
@@ -2861,8 +2856,7 @@ builder.Services.AddMediatR(cfg =>
 
 **Program.cs'deki Tam Konum:**
 - Dosya: `src/Services/Catalog/Catalog.API/Program.cs`
-- Satır 14-20 arası
-- `builder.Services.AddOpenApi();` satırından sonra
+- `builder.Services.AddControllers();` satırından sonra
 
 **Gerekli using'ler:**
 ```csharp
@@ -3596,7 +3590,7 @@ Response alır:
 - Development ortamında Swagger UI middleware'leri eklendi
 
 **Adım 1: Controller Servisleri Eklendi**
-- **Konum:** `builder.Services.AddOpenApi();` satırından sonra
+- **Konum:** `Program.cs` dosyasında, servis kayıtları bölümünde
 - **Eklenen kod:** `builder.Services.AddControllers();`
 - **Ne işe yarar:** Controller'ları DI container'a kaydeder ve kullanılabilir hale getirir
   - `ProductsController` ve `CategoriesController` gibi Controller'ları bulur
@@ -3645,7 +3639,7 @@ Response: HTTP 200 OK + ProductDto listesi
 - **İçerdiği paketler:** SwaggerGen, Swagger, SwaggerUI
 
 **Adım 4: Program.cs'de Swagger Servisleri Eklendi**
-- **Konum:** `builder.Services.AddOpenApi();` satırından sonra
+- **Konum:** `Program.cs` dosyasında, `builder.Services.AddControllers();` satırından sonra
 - **Eklenen kod:**
   - `AddEndpointsApiExplorer()`: Controller endpoint'lerini Swagger'a ekler
   - `AddSwaggerGen()`: Swagger dokümantasyonunu oluşturur (API bilgileri ile)
