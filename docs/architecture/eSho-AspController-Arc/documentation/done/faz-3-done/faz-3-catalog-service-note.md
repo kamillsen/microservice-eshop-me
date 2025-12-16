@@ -8,6 +8,7 @@
 > - Faz 3.3: Catalog CQRS - Products Commands
 > - Faz 3.4: Catalog CQRS - Products Queries
 > - Faz 3.5: Catalog CQRS - Categories
+> - Faz 3.6: Catalog Controllers & MediatR Entegrasyonu
 
 ---
 
@@ -2828,6 +2829,229 @@ if (categoryId.HasValue)
 - MediatR pipeline'ında otomatik çalışır
 - CreateCategoryCommand gönderilince `CreateCategoryValidator` çalışır
 - Hata varsa `ValidationException` fırlatılır, Handler'a gitmez
+
+---
+
+## 3.6 Catalog Controllers & MediatR Entegrasyonu - Yapılanlar
+
+**Hedef:** REST API endpoint'leri ve servis kayıtları
+
+---
+
+### Adım 1: Program.cs'de MediatR Servisini Register Et
+
+**Dosya:**
+- `Program.cs`
+
+**Ne yapıldı:**
+- `builder.Services.AddOpenApi();` satırından sonra MediatR servisi eklendi
+- Handler'ları otomatik bulmak için `RegisterServicesFromAssembly` kullanıldı
+- Pipeline behavior'lar eklendi (LoggingBehavior, ValidationBehavior)
+
+**Kod:**
+```csharp
+// MediatR
+builder.Services.AddMediatR(cfg =>
+{
+    cfg.RegisterServicesFromAssembly(typeof(Program).Assembly);
+    cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
+    cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+});
+```
+
+**Program.cs'deki Tam Konum:**
+- Dosya: `src/Services/Catalog/Catalog.API/Program.cs`
+- Satır 14-20 arası
+- `builder.Services.AddOpenApi();` satırından sonra
+
+**Gerekli using'ler:**
+```csharp
+using MediatR;
+using BuildingBlocks.Behaviors.Behaviors;
+```
+
+**Ne işe yarar:**
+- **`RegisterServicesFromAssembly`**: Catalog.API assembly'sindeki tüm Handler'ları (`IRequestHandler<TRequest, TResponse>`) otomatik bulur ve DI container'a kaydeder
+  
+  **Nasıl Çalışır?**
+  1. **Reflection ile Tarama**: `typeof(Program).Assembly` ile Catalog.API assembly'sini alır ve reflection kullanarak assembly'deki tüm class'ları tarar
+  2. **Interface Kontrolü**: Her class için `IRequestHandler<TRequest, TResponse>` interface'ini implement edip etmediğini kontrol eder
+  3. **Bulunan Class'ları Kaydetme**: Interface'i implement eden class'ları DI container'a kaydeder (Scoped lifetime ile)
+  
+  **Örnekler:**
+  ```csharp
+  // ✅ BULUNUR ve KAYDEDİLİR - IRequestHandler implement ediyor
+  public class CreateProductHandler : IRequestHandler<CreateProductCommand, Guid>
+  {
+      public async Task<Guid> Handle(CreateProductCommand request, ...) { }
+  }
+  
+  // ✅ BULUNUR ve KAYDEDİLİR - IRequestHandler implement ediyor
+  public class GetProductsHandler : IRequestHandler<GetProductsQuery, IEnumerable<ProductDto>>
+  {
+      public async Task<IEnumerable<ProductDto>> Handle(GetProductsQuery request, ...) { }
+  }
+  
+  // ❌ BULUNMAZ - IRequestHandler implement etmiyor
+  public class ProductDto { }  // Sadece DTO, handler değil
+  
+  // ❌ BULUNMAZ - IRequestHandler implement etmiyor
+  public class CreateProductValidator : AbstractValidator<CreateProductCommand> { }  // Validator, handler değil
+  ```
+  
+  **Manuel Kayıt vs Otomatik Kayıt:**
+  ```csharp
+  // ❌ Manuel kayıt (yapmıyoruz, otomatik yapılıyor)
+  builder.Services.AddScoped<IRequestHandler<CreateProductCommand, Guid>, CreateProductHandler>();
+  builder.Services.AddScoped<IRequestHandler<GetProductsQuery, IEnumerable<ProductDto>>, GetProductsHandler>();
+  // ... her handler için tek tek yazmak gerekir
+  
+  // ✅ Otomatik kayıt (RegisterServicesFromAssembly yapıyor)
+  cfg.RegisterServicesFromAssembly(typeof(Program).Assembly);
+  // → Tüm IRequestHandler implement eden class'lar otomatik bulunur ve kaydedilir
+  ```
+  
+  **Sonuç:**
+  - `CreateProductHandler` → `IRequestHandler<CreateProductCommand, Guid>` olarak kaydedilir
+  - `GetProductsHandler` → `IRequestHandler<GetProductsQuery, IEnumerable<ProductDto>>` olarak kaydedilir
+  - `CreateCategoryHandler` → `IRequestHandler<CreateCategoryCommand, Guid>` olarak kaydedilir
+  - ... ve diğer tüm handler'lar otomatik kaydedilir
+  - Her handler **Scoped lifetime** ile kaydedilir (her HTTP request'te yeni instance)
+- **`AddBehavior<LoggingBehavior>`**: MediatR pipeline'ına logging behavior ekler
+  - Her request loglanır (request tipi, parametreler)
+  - Her response loglanır (dönen değer, süre)
+  - Pipeline'da ilk sırada çalışır (diğer behavior'lardan önce)
+- **`AddBehavior<ValidationBehavior>`**: MediatR pipeline'ına validation behavior ekler
+  - Her request otomatik validate edilir
+  - FluentValidation validator'ları kullanılır
+  - Hata varsa `ValidationException` fırlatılır, Handler'a gitmez
+  - Pipeline'da LoggingBehavior'dan sonra çalışır
+
+**Neden gerekli?**
+- Handler'ları manuel kaydetmek yerine otomatik bulma (reflection ile)
+- Pipeline behavior'lar sayesinde cross-cutting concerns (logging, validation) merkezi olarak yönetilir
+- Her handler'da ayrı ayrı logging/validation yazmaya gerek yok
+
+**Pipeline Sırası:**
+1. **LoggingBehavior** → Request loglanır
+2. **ValidationBehavior** → Request validate edilir
+3. **Handler** → İş mantığı çalışır
+4. **ValidationBehavior** → Response loglanır (geri dönüş)
+5. **LoggingBehavior** → Response loglanır (geri dönüş)
+
+**Sonuç:** ✅ MediatR servisi register edildi
+
+---
+
+### Adım 2: Program.cs'de FluentValidation Servisini Register Et
+
+**Dosya:**
+- `Program.cs`
+
+**Ne yapıldı:**
+- MediatR eklediğin kısımdan hemen sonra FluentValidation servisi eklendi
+- Validator'ları otomatik bulmak için `AddValidatorsFromAssembly` kullanıldı
+
+**Kod:**
+```csharp
+// FluentValidation
+builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
+```
+
+**Gerekli using:**
+```csharp
+using FluentValidation;
+```
+
+**Ne işe yarar:**
+- **`AddValidatorsFromAssembly`**: Catalog.API assembly'sindeki tüm Validator'ları (`AbstractValidator<T>`) otomatik bulur ve DI container'a kaydeder
+  
+  **Nasıl Çalışır?**
+  1. **Reflection ile Tarama**: `typeof(Program).Assembly` ile Catalog.API assembly'sini alır ve reflection kullanarak assembly'deki tüm class'ları tarar
+  2. **Base Class Kontrolü**: Her class için `AbstractValidator<T>` base class'ından türeyip türemediğini kontrol eder
+  3. **Bulunan Class'ları Kaydetme**: `AbstractValidator<T>`'den türeyen class'ları DI container'a kaydeder (`IValidator<T>` olarak, Scoped lifetime ile)
+  
+  **Örnekler:**
+  ```csharp
+  // ✅ BULUNUR ve KAYDEDİLİR - AbstractValidator'den türüyor
+  public class CreateProductValidator : AbstractValidator<CreateProductCommand>
+  {
+      public CreateProductValidator()
+      {
+          RuleFor(x => x.Name).NotEmpty();
+      }
+  }
+  
+  // ✅ BULUNUR ve KAYDEDİLİR - AbstractValidator'den türüyor
+  public class UpdateProductValidator : AbstractValidator<UpdateProductCommand>
+  {
+      public UpdateProductValidator()
+      {
+          RuleFor(x => x.Id).NotEmpty();
+      }
+  }
+  
+  // ❌ BULUNMAZ - AbstractValidator'den türemiyor
+  public class ProductDto { }  // Sadece DTO, validator değil
+  
+  // ❌ BULUNMAZ - AbstractValidator'den türemiyor
+  public class CreateProductHandler : IRequestHandler<CreateProductCommand, Guid> { }  // Handler, validator değil
+  ```
+  
+  **Manuel Kayıt vs Otomatik Kayıt:**
+  ```csharp
+  // ❌ Manuel kayıt (yapmıyoruz, otomatik yapılıyor)
+  builder.Services.AddScoped<IValidator<CreateProductCommand>, CreateProductValidator>();
+  builder.Services.AddScoped<IValidator<UpdateProductCommand>, UpdateProductValidator>();
+  // ... her validator için tek tek yazmak gerekir
+  
+  // ✅ Otomatik kayıt (AddValidatorsFromAssembly yapıyor)
+  builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
+  // → Tüm AbstractValidator<T> türeyen class'lar otomatik bulunur ve kaydedilir
+  ```
+  
+  **Sonuç:**
+  - `CreateProductValidator` → `IValidator<CreateProductCommand>` olarak kaydedilir
+  - `UpdateProductValidator` → `IValidator<UpdateProductCommand>` olarak kaydedilir
+  - `CreateCategoryValidator` → `IValidator<CreateCategoryCommand>` olarak kaydedilir
+  - ... ve diğer tüm validator'lar otomatik kaydedilir
+  - Her validator **Scoped lifetime** ile kaydedilir (her HTTP request'te yeni instance)
+
+- **ValidationBehavior ile entegrasyon**: ValidationBehavior, DI container'dan `IValidator<TRequest>` tipindeki validator'ları alır ve çalıştırır
+  - Örnek: `CreateProductCommand` gönderilince → `IValidator<CreateProductCommand>` aranır → `CreateProductValidator` bulunur → `ValidateAsync()` çağrılır
+
+**Neden gerekli?**
+- Validator'ları manuel kaydetmek yerine otomatik bulma (reflection ile)
+- ValidationBehavior'ın validator'ları bulabilmesi için DI container'da kayıtlı olmalı
+- Her command/query için validator varsa otomatik çalışır
+
+**Nasıl Çalışır?**
+1. Controller command'i MediatR'a gönderir: `await _mediator.Send(new CreateProductCommand { ... })`
+2. MediatR pipeline başlar
+3. **ValidationBehavior** çalışır:
+   - DI container'dan `IValidator<CreateProductCommand>[]` alır
+   - `CreateProductValidator` bulunur
+   - `CreateProductValidator.ValidateAsync(command)` çağrılır
+   - FluentValidation kuralları kontrol edilir
+   - Hata varsa → `ValidationException` fırlatılır (Handler'a gitmez)
+   - Hata yoksa → Handler'a geçilir
+4. Handler çalışır (validation başarılıysa)
+
+**Sonuç:** ✅ FluentValidation servisi register edildi
+
+---
+
+## 3.6 Bölümü - Tamamlanan Kontroller (Kısmi)
+
+✅ MediatR servisi register edildi (Handler'lar otomatik bulunuyor)
+✅ MediatR pipeline behavior'lar eklendi (LoggingBehavior, ValidationBehavior)
+✅ FluentValidation servisi register edildi (Validator'lar otomatik bulunuyor)
+⏳ AutoMapper servisi register edilecek (Adım 3)
+⏳ Exception Handler register edilecek (Adım 4)
+⏳ Health Checks eklenecek (Adım 5)
+⏳ ProductsController oluşturulacak (Adım 6)
+⏳ CategoriesController oluşturulacak (Adım 7)
+⏳ Swagger konfigürasyonu yapılacak (Adım 8)
 
 ---
 

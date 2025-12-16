@@ -9,3 +9,5 @@ public class CreateProductDto
     public Guid CategoryId { get; set; }
 }
 
+
+
