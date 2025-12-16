@@ -509,6 +509,375 @@ Generic type matching sayesinde otomatik eşleşir.
 
 ---
 
+## 3.3. Handler İçinde AutoMapper Nasıl Çalışıyor?
+
+### Soru: `_mapper.Map<Product>(request)` Nasıl Doğru Mapping Kuralını Buluyor?
+
+Handler içinde (Satır 483) şu kod var:
+
+```csharp
+var product = _mapper.Map<Product>(request);
+```
+
+Bu satır çalıştığında AutoMapper nasıl `CreateProductCommand → Product` mapping kuralını buluyor? Program.cs'de ne yapıldı ki bu otomatik çalışıyor?
+
+---
+
+### 1. Program.cs'de Ne Yapıyoruz? (Satır 24)
+
+**Kod:**
+```csharp
+builder.Services.AddAutoMapper(typeof(Program).Assembly);
+```
+
+**Bu Satır Ne Yapıyor?**
+
+#### 1.1. Assembly'yi Alıyor
+
+```csharp
+// AutoMapper içinde
+Assembly assembly = typeof(Program).Assembly;
+// → Catalog.API.dll assembly'si alınır
+```
+
+#### 1.2. Assembly'deki Tüm Class'ları Tarıyor
+
+```csharp
+// AutoMapper içinde
+var allTypes = assembly.GetTypes()
+    .Where(t => t.IsClass && !t.IsAbstract && t.IsPublic)
+    .ToList();
+// → [Program, MappingProfile, Product, ProductDto, CreateProductHandler, ...]
+```
+
+#### 1.3. Profile Sınıfını Miras Alan Class'ları Arıyor
+
+```csharp
+// AutoMapper içinde
+foreach (var type in allTypes)
+{
+    // Bu class Profile sınıfını miras alıyor mu?
+    if (typeof(Profile).IsAssignableFrom(type))
+    {
+        // ✅ EVET! MappingProfile bulundu
+        // → new MappingProfile() yapılır
+    }
+}
+```
+
+**Kontrol:**
+- `typeof(Profile).IsAssignableFrom(typeof(MappingProfile))` → `true` ✅
+  - Çünkü: `MappingProfile : Profile` (kalıtım var)
+- `typeof(Profile).IsAssignableFrom(typeof(Product))` → `false` ❌
+  - Çünkü: `Product` Profile'dan türemiyor
+
+**Sonuç:** AutoMapper, assembly'deki tüm class'ları tarar ve **Profile sınıfını miras alan (inherit eden) class'ları** bulur. Bizim projemizde sadece `MappingProfile` bu kriteri sağlar.
+
+#### 1.4. MappingProfile Instance'ı Oluşturuyor
+
+```csharp
+// AutoMapper içinde
+var profileInstance = Activator.CreateInstance(typeof(MappingProfile));
+// → new MappingProfile() çağrısı yapılır
+```
+
+Bu noktada `MappingProfile` constructor çalışır.
+
+---
+
+### 2. MappingProfile Constructor Çalışıyor
+
+**Ne Zaman Çalışır?**
+
+`AddAutoMapper` içinde `new MappingProfile()` çağrıldığında.
+
+**Kod (MappingProfile.cs, Satır 12-23):**
+
+```csharp
+public MappingProfile()
+{
+    // Command → Entity
+    CreateMap<CreateProductCommand, Product>();
+    CreateMap<UpdateProductCommand, Product>();
+    CreateMap<CreateCategoryCommand, Category>();
+    
+    // Entity → DTO
+    CreateMap<Product, ProductDto>()
+        .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.Category != null ? src.Category.Name : string.Empty));
+    CreateMap<Category, CategoryDto>();
+}
+```
+
+**Her `CreateMap` Ne Yapıyor?**
+
+#### Satır 15: `CreateMap<CreateProductCommand, Product>();`
+
+**Ne yapıyor:**
+- `CreateProductCommand` → `Product` mapping kuralını kaydeder.
+
+**Nasıl çalışıyor:**
+```csharp
+// AutoMapper içinde (basitleştirilmiş)
+public IMappingExpression<TSource, TDestination> CreateMap<TSource, TDestination>()
+{
+    // 1. Mapping kuralını oluştur
+    var mappingExpression = new MappingExpression<CreateProductCommand, Product>();
+    
+    // 2. Property eşleştirmelerini otomatik yap (convention-based)
+    // → Aynı isimli property'leri eşleştir:
+    //   CreateProductCommand.Name → Product.Name
+    //   CreateProductCommand.Description → Product.Description
+    //   CreateProductCommand.Price → Product.Price
+    //   CreateProductCommand.ImageUrl → Product.ImageUrl
+    //   CreateProductCommand.CategoryId → Product.CategoryId
+    
+    // 3. Mapping kuralını configuration'a kaydet
+    // → Kaynak tip: CreateProductCommand
+    // → Hedef tip: Product
+    configuration.AddMapping(mappingExpression);
+    
+    return mappingExpression;
+}
+```
+
+**Nereye kaydediliyor:**
+```
+┌─────────────────────────────────────────────┐
+│ AutoMapper Configuration (Memory'de)        │
+│                                             │
+│ Mapping Kuralları:                         │
+│  ✅ CreateProductCommand → Product         │
+│     Kaynak Tip: CreateProductCommand        │
+│     Hedef Tip: Product                      │
+│     Property Eşleştirmeleri:                │
+│       • Name → Name                         │
+│       • Description → Description            │
+│       • Price → Price                       │
+│       • ImageUrl → ImageUrl                  │
+│       • CategoryId → CategoryId             │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+### 3. IMapper Servisi DI Container'a Ekleniyor
+
+**Ne Zaman?**
+
+Constructor çalıştıktan ve tüm `CreateMap` kuralları kaydedildikten sonra.
+
+**Ne Yapıyor?**
+
+```csharp
+// AutoMapper içinde
+builder.Services.AddSingleton<IMapper>(sp =>
+{
+    // 1. Tüm mapping kurallarını içeren configuration'ı oluştur
+    var configuration = new MapperConfiguration(cfg =>
+    {
+        cfg.AddProfile(profileInstance); // MappingProfile'daki tüm kurallar
+    });
+    
+    // 2. IMapper instance'ı oluştur
+    var mapper = configuration.CreateMapper();
+    
+    // 3. DI container'a ekle
+    return mapper;
+});
+```
+
+**Sonuç:**
+```
+┌─────────────────────────────────────────────┐
+│ DI Container (Service Provider)            │
+│                                             │
+│ Servisler:                                 │
+│  ✅ IMapper → Mapper instance              │
+│     └─ İçinde tüm mapping kuralları var   │
+│        • CreateProductCommand → Product     │
+│        • UpdateProductCommand → Product    │
+│        • CreateCategoryCommand → Category   │
+│        • Product → ProductDto              │
+│        • Category → CategoryDto            │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+### 4. Handler'da `_mapper.Map<Product>(request)` Çağrıldığında Ne Oluyor?
+
+**Kod (CreateProductHandler.cs, Satır 22):**
+
+```csharp
+var product = _mapper.Map<Product>(request);
+//    ↑ IMapper (DI'dan geliyor, içinde tüm mapping kuralları var)
+//              ↑ Hedef tip (Product)
+//                        ↑ Kaynak (CreateProductCommand)
+```
+
+**Kritik Soru: AutoMapper Hangi Mapping Kuralını Kullanacak?**
+
+AutoMapper, kaynak ve hedef tiplere göre doğru mapping kuralını bulur:
+
+```csharp
+// AutoMapper içinde
+public TDestination Map<TDestination>(object source)
+{
+    // 1. Kaynak tipi al
+    Type sourceType = source.GetType();
+    // → typeof(CreateProductCommand)
+    
+    // 2. Hedef tipi al
+    Type destinationType = typeof(TDestination);
+    // → typeof(Product)
+    
+    // 3. Mapping kuralını bul (configuration'dan)
+    // → Kaynak tip: CreateProductCommand
+    // → Hedef tip: Product
+    // → Bu iki tip eşleşen kuralı ara
+    var mapping = configuration.GetAllTypeMaps()
+        .FirstOrDefault(m => 
+            m.SourceType == typeof(CreateProductCommand) && 
+            m.DestinationType == typeof(Product));
+    // → ✅ BULUNDU! (MappingProfile constructor'ında kaydedilmişti)
+    
+    // 4. Yeni Product instance'ı oluştur
+    var product = new Product();
+    
+    // 5. Property'leri eşleştir (kaydedilmiş kurallara göre)
+    product.Name = request.Name;
+    // → "iPhone 15"
+    
+    product.Description = request.Description;
+    // → "Apple iPhone 15 128GB"
+    
+    product.Price = request.Price;
+    // → 35000.00m
+    
+    product.ImageUrl = request.ImageUrl;
+    // → "https://example.com/iphone15.jpg"
+    
+    product.CategoryId = request.CategoryId;
+    // → Guid.Parse("3fa85f64-5717-4562-b3fc-2c963f66afa6")
+    
+    // 6. Product instance'ı döndür
+    return product;
+}
+```
+
+**Görsel: Mapping Kuralı Bulma Süreci**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ _mapper.Map<Product>(request) çağrıldı                  │
+│ (Handler içinde, Satır 483)                              │
+│                                                           │
+│ 1. Kaynak tip: CreateProductCommand                      │
+│ 2. Hedef tip: Product                                    │
+│                                                           │
+│ 3. Configuration'daki kuralları ara:                     │
+│  ┌────────────────────────────────────────────────┐     │
+│  │ Kural 1: CreateProductCommand → Product        │     │
+│  │   Kaynak: CreateProductCommand ✅                │     │
+│  │   Hedef: Product ✅                              │     │
+│  │   → EŞLEŞTİ! ✅                                  │     │
+│  └────────────────────────────────────────────────┘     │
+│                                                           │
+│  ┌────────────────────────────────────────────────┐     │
+│  │ Kural 2: UpdateProductCommand → Product         │     │
+│  │   Kaynak: UpdateProductCommand ❌                │     │
+│  │   Hedef: Product ✅                              │     │
+│  │   → EŞLEŞMEDİ! ❌                                │     │
+│  └────────────────────────────────────────────────┘     │
+│                                                           │
+│  ┌────────────────────────────────────────────────┐     │
+│  │ Kural 3: Product → ProductDto                  │     │
+│  │   Kaynak: Product ❌                            │     │
+│  │   Hedef: ProductDto ❌                           │     │
+│  │   → EŞLEŞMEDİ! ❌                                │     │
+│  └────────────────────────────────────────────────┘     │
+│                                                           │
+│ ✅ SONUÇ: Kural 1 kullanılacak!                         │
+│    CreateProductCommand → Product                       │
+│                                                           │
+│ 4. Property'ler eşleştirilir:                           │
+│    • Name → Name                                        │
+│    • Description → Description                          │
+│    • Price → Price                                      │
+│    • ImageUrl → ImageUrl                                 │
+│    • CategoryId → CategoryId                            │
+│                                                           │
+│ 5. Product instance'ı döndürülür                        │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Sonuç:**
+
+```csharp
+var product = new Product
+{
+    Id = Guid.Empty,  // (henüz set edilmedi)
+    Name = "iPhone 15",
+    Description = "Apple iPhone 15 128GB",
+    Price = 35000.00m,
+    ImageUrl = "https://example.com/iphone15.jpg",
+    CategoryId = Guid.Parse("3fa85f64-5717-4562-b3fc-2c963f66afa6"),
+    Category = null  // (Command'de yok, ignore edilir)
+};
+```
+
+---
+
+### 5. Özet: AutoMapper'ın Çalışma Süreci
+
+**Kodun Çalışma Sırası:**
+
+```
+1. Uygulama Başlar
+   └─ Program.cs çalışır
+
+2. Satır 24: AddAutoMapper(typeof(Program).Assembly)
+   └─ Assembly'yi alır
+   └─ Tüm class'ları tarar
+   └─ Profile sınıfını miras alan class'ları bulur (MappingProfile)
+   └─ new MappingProfile() yapar
+
+3. MappingProfile() Constructor Çalışır
+   └─ CreateMap<CreateProductCommand, Product>() → Kural kaydedilir
+   └─ CreateMap<UpdateProductCommand, Product>() → Kural kaydedilir
+   └─ CreateMap<CreateCategoryCommand, Category>() → Kural kaydedilir
+   └─ CreateMap<Product, ProductDto>() → Kural kaydedilir
+   └─ CreateMap<Category, CategoryDto>() → Kural kaydedilir
+
+4. IMapper Servisi DI Container'a Eklenir
+   └─ Tüm mapping kuralları içinde
+
+5. Uygulama Hazır (app.Run())
+
+6. HTTP Request Gelir
+   └─ Handler çalışır
+   └─ _mapper.Map<TDestination>(source) çağrılır
+   └─ AutoMapper kaynak ve hedef tiplere göre doğru kuralı bulur
+   └─ Mapping yapılır
+```
+
+**Mapping Kuralı Seçimi:**
+
+AutoMapper, `_mapper.Map<TDestination>(source)` çağrıldığında:
+
+1. **Kaynak tipi alır:** `source.GetType()` → `typeof(CreateProductCommand)`
+2. **Hedef tipi alır:** `typeof(TDestination)` → `typeof(Product)`
+3. **Configuration'daki tüm mapping kurallarını tarar**
+4. **Kaynak tip ve hedef tip eşleşen kuralı bulur:**
+   - `m.SourceType == typeof(CreateProductCommand)` ✅
+   - `m.DestinationType == typeof(Product)` ✅
+   - → Bu kural kullanılır!
+5. **Bulunan kurala göre mapping yapar**
+
+**Sonuç:** AutoMapper, kaynak ve hedef tiplere göre doğru mapping kuralını otomatik bulur ve kullanır. Bu sayede Handler içinde sadece `_mapper.Map<Product>(request)` yazmak yeterli olur.
+
+---
+
 ## 5. Gerçek Kod İncelemesi
 
 ### LoggingBehavior.cs (Gerçek Kod):
