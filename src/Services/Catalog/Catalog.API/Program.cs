@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using MediatR;
 using BuildingBlocks.Behaviors.Behaviors;
 using FluentValidation;
+using BuildingBlocks.Exceptions.Handler;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -10,6 +11,21 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+
+// Controllers
+builder.Services.AddControllers();
+
+// Swagger/OpenAPI
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new()
+    {
+        Title = "Catalog API",
+        Version = "v1",
+        Description = "E-ticaret Catalog Service API - Ürün ve kategori yönetimi için REST API"
+    });
+});
 
 // MediatR
 builder.Services.AddMediatR(cfg =>
@@ -26,8 +42,20 @@ builder.Services.AddAutoMapper(typeof(Program).Assembly);
 builder.Services.AddDbContext<CatalogDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Database")));
 
+// Exception Handler
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
+
+// Health Checks
+builder.Services.AddHealthChecks()
+    .AddNpgSql(builder.Configuration.GetConnectionString("Database")!);
 
 var app = builder.Build();
+
+
+
+// Exception Handler Middleware
+app.UseExceptionHandler();
 
 // Migration ve Seed Data
 using (var scope = app.Services.CreateScope())
@@ -45,9 +73,23 @@ using (var scope = app.Services.CreateScope())
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+    
+    // Swagger UI
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Catalog API v1");
+        c.RoutePrefix = string.Empty; // Swagger UI'ı root'ta göster (http://localhost:5001/)
+    });
 }
 
 app.UseHttpsRedirection();
+
+// Controllers
+app.MapControllers();
+
+// Health Checks
+app.MapHealthChecks("/health");
 
 var summaries = new[]
 {

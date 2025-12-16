@@ -3163,6 +3163,18 @@ builder.Services.AddAutoMapper(typeof(Program).Assembly);
 - Exception Handler ve ProblemDetails servislerini ekleyeceğiz
 - Exception middleware'i pipeline'a ekleyeceğiz
 
+**Neden?**
+- **Global Exception Handler**: Tüm exception'ları yakalayıp standart bir formatta döndürür
+- **ProblemDetails**: HTTP hata yanıtlarını RFC 7807 standardına uygun formatta döndürür
+
+**Nasıl çalışır?**
+1. **`AddExceptionHandler<GlobalExceptionHandler>()`**: GlobalExceptionHandler'ı DI container'a ekler
+2. **`AddProblemDetails()`**: ProblemDetails formatını etkinleştirir
+3. **`app.UseExceptionHandler()`**: Exception middleware'i pipeline'a ekler; hatalar bu middleware'de yakalanır
+
+**Nereye eklenecek?**
+- `Program.cs` dosyasında, `builder.Services.AddDbContext<CatalogDbContext>` satırından sonra (yaklaşık 27. satırdan sonra) ekleyin
+
 **Kod (Eklenecek):**
 ```csharp
 // Exception Handler
@@ -3172,7 +3184,34 @@ builder.Services.AddProblemDetails();
 
 **Gerekli using:**
 ```csharp
-using BuildingBlocks.Exceptions.Handlers;
+using BuildingBlocks.Exceptions.Handler;
+```
+
+**Tam konum (örnek):**
+```csharp
+builder.Services.AddDbContext<CatalogDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Database")));
+
+// Exception Handler
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
+```
+
+**Ayrıca:**
+- `app.UseExceptionHandler()` middleware'ini de eklemeniz gerekiyor. Bu, `var app = builder.Build();` satırından sonra, `app.UseHttpsRedirection();` satırından önce eklenmeli
+
+**Middleware kodu:**
+```csharp
+var app = builder.Build();
+
+// Exception Handler Middleware
+app.UseExceptionHandler();
+
+// Migration ve Seed Data
+using (var scope = app.Services.CreateScope())
+{
+    // ...
+}
 ```
 
 **Ne işe yarar:**
@@ -3180,27 +3219,72 @@ using BuildingBlocks.Exceptions.Handlers;
   - Tüm exception'ları yakalar
   - Standart HTTP response formatına dönüştürür
   - `NotFoundException` → 404 Not Found
-  - `ValidationException` → 400 Bad Request
+  - `BadRequestException` → 400 Bad Request
   - `InternalServerException` → 500 Internal Server Error
+  - Diğer exception'lar → 500 Internal Server Error
 
 - **`AddProblemDetails()`**: RFC 7807 standardına uygun ProblemDetails formatını etkinleştirir
   - Hata yanıtları standart formatta döner
-  - `type`, `title`, `status`, `detail` gibi alanlar içerir
+  - `type`, `title`, `status`, `detail`, `instance` gibi alanlar içerir
 
-**Middleware (app.Build() sonrası eklenecek):**
+**Nasıl çalışır? (Detaylı akış):**
+
+1. **Uygulama başlangıcı:**
+   - `Program.cs` çalışır
+   - `builder.Services.AddExceptionHandler<GlobalExceptionHandler>()` çağrılır
+   - `GlobalExceptionHandler` DI container'a kaydedilir (Scoped lifetime)
+   - `builder.Services.AddProblemDetails()` çağrılır
+   - ProblemDetails formatı etkinleştirilir
+
+2. **HTTP request geldiğinde:**
+   - Request pipeline'dan geçer
+   - Handler'da exception fırlatılırsa (örn: `throw new NotFoundException(...)`)
+   - `app.UseExceptionHandler()` middleware exception'ı yakalar
+   - `GlobalExceptionHandler.TryHandleAsync()` çağrılır
+   - Exception tipine göre ProblemDetails oluşturulur:
+     - `NotFoundException` → 404 Not Found
+     - `BadRequestException` → 400 Bad Request
+     - `InternalServerException` → 500 Internal Server Error
+     - Diğer exception'lar → 500 Internal Server Error
+   - ProblemDetails JSON formatında response olarak döner
+
+**Örnek senaryo:**
 ```csharp
-var app = builder.Build();
+// Handler'da
+var product = await _context.Products.FindAsync(id);
+if (product == null)
+    throw new NotFoundException(nameof(Product), id);
+// → GlobalExceptionHandler yakalar
+// → 404 Not Found ProblemDetails döner
+```
 
-// Exception Handler Middleware
-app.UseExceptionHandler();
+**Response örneği (NotFoundException için):**
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc7807",
+  "title": "Not Found",
+  "status": 404,
+  "detail": "Entity \"Product\" (123) was not found.",
+  "instance": "/api/products/123"
+}
 ```
 
 **Neden gerekli?**
 - Tüm exception'ları merkezi olarak yönetmek
 - Standart hata yanıt formatı (RFC 7807)
 - Handler'larda `throw new NotFoundException(...)` yazınca otomatik 404 dönmesi
+- Güvenlik: Stack trace gibi hassas bilgilerin kullanıcıya gösterilmemesi
+- Tutarlılık: Tüm servislerde aynı hata formatı
 
-**Sonuç:** ⏳ Exception Handler ve ProblemDetails eklenecek
+**Özet:**
+1. `builder.Services.AddExceptionHandler<GlobalExceptionHandler>();` ekleyin (DbContext'ten sonra)
+2. `builder.Services.AddProblemDetails();` ekleyin
+3. `app.UseExceptionHandler();` ekleyin (`var app = builder.Build();` satırından sonra)
+4. `using BuildingBlocks.Exceptions.Handler;` using'ini ekleyin
+
+**Not:** Exception Handler için otomatik bulma mekanizması yok (MediatR Handler'lar gibi). Manuel ekleme yapılır çünkü genellikle tek bir GlobalExceptionHandler olur ve her serviste aynı handler kullanılır.
+
+**Sonuç:** ✅ Exception Handler ve ProblemDetails eklendi
 
 ---
 
@@ -3209,291 +3293,516 @@ app.UseExceptionHandler();
 **Dosya:**
 - `Program.cs`
 
-**Ne yapılacak:**
-- PostgreSQL veritabanı için health check ekleyeceğiz
-- Health check endpoint'i ekleyeceğiz
+**Ne yapıldı:**
+- PostgreSQL veritabanı için health check eklendi
+- Health check endpoint'i eklendi
+
+**Neden?**
+- Uygulamanın sağlık durumunu kontrol etmek
+- Kubernetes, Docker Swarm gibi orchestration tool'ları için
+- Monitoring ve alerting için
+- Veritabanı bağlantısının çalışıp çalışmadığını kontrol etmek
+
+**Nasıl çalışır?**
+1. **`AddHealthChecks()`**: Health check servislerini DI container'a kaydeder
+2. **`AddNpgSql(...)`**: PostgreSQL veritabanı bağlantısını kontrol eder
+3. **`MapHealthChecks("/health")`**: `/health` endpoint'ini oluşturur
+
+**Nereye eklenecek?**
+- `Program.cs` dosyasında, `builder.Services.AddProblemDetails();` satırından sonra ekleyin
 
 **Kod (Eklenecek):**
 ```csharp
 // Health Checks
 builder.Services.AddHealthChecks()
-    .AddNpgSql(builder.Configuration.GetConnectionString("Database"));
+    .AddNpgSql(builder.Configuration.GetConnectionString("Database")!);
 ```
 
 **Gerekli using:**
 ```csharp
-using AspNetCore.HealthChecks.NpgSql;
+// AspNetCore.HealthChecks.NpgSql paketi extension method sağlar
+// Özel using gerekmez, extension method olarak gelir
 ```
 
-**Middleware (app.Build() sonrası eklenecek):**
+**Tam konum (örnek):**
 ```csharp
+// Exception Handler
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
+
+// Health Checks
+builder.Services.AddHealthChecks()
+    .AddNpgSql(builder.Configuration.GetConnectionString("Database")!);
+```
+
+**Ayrıca:**
+- `app.MapHealthChecks("/health")` endpoint'ini de eklemeniz gerekiyor. Bu, `app.UseHttpsRedirection();` satırından sonra eklenmeli
+
+**Endpoint kodu:**
+```csharp
+app.UseHttpsRedirection();
+
+// Health Checks
 app.MapHealthChecks("/health");
 ```
 
 **Ne işe yarar:**
 - **`AddHealthChecks()`**: Health check servislerini DI container'a kaydeder
-- **`AddNpgSql()`**: PostgreSQL veritabanı bağlantısını kontrol eder
-  - Veritabanına bağlanabilirse → Healthy
-  - Bağlanamazsa → Unhealthy
+  - Health check'leri çalıştıracak altyapıyı hazırlar
+  - `IHealthCheck` implementasyonlarını çalıştırmak için servisler kaydedilir
+
+- **`AddNpgSql(connectionString)`**: PostgreSQL veritabanı için health check ekler
+  - Connection string'i kaydeder
+  - Health check çalıştığında PostgreSQL'e bağlanmayı dener
+  - `SELECT 1;` gibi basit bir sorgu çalıştırılır
+  - Başarılıysa → `Healthy` döner
+  - Başarısızsa → `Unhealthy` döner
 
 - **`MapHealthChecks("/health")`**: `/health` endpoint'ini oluşturur
-  - `GET /health` → `{ "status": "Healthy" }` veya `{ "status": "Unhealthy" }`
+  - `GET /health` isteği geldiğinde tüm health check'ler çalıştırılır
+  - Sonuçlar toplanır ve JSON formatında döner
+  - Tüm check'ler `Healthy` ise → `{ "status": "Healthy" }` (HTTP 200)
+  - Herhangi biri `Unhealthy` ise → `{ "status": "Unhealthy" }` (HTTP 503)
 
-**Neden gerekli?**
-- Uygulamanın sağlık durumunu kontrol etmek
-- Kubernetes, Docker Swarm gibi orchestration tool'ları için
-- Monitoring ve alerting için
+**Nasıl çalışır? (Detaylı akış):**
 
-**Sonuç:** ⏳ Health Checks eklenecek
+1. **Uygulama başlangıcı:**
+   - `Program.cs` çalışır
+   - `builder.Services.AddHealthChecks()` çağrılır
+   - Health check servisleri DI container'a kaydedilir
+   - `.AddNpgSql(...)` ile PostgreSQL health check'i eklenir
+   - Connection string kaydedilir
+   - `app.MapHealthChecks("/health")` ile endpoint oluşturulur
+
+2. **HTTP request geldiğinde (`GET /health`):**
+   - `/health` route'u bulunur
+   - Health check middleware çalışır
+   - Tüm kayıtlı health check'ler çalıştırılır:
+     - PostgreSQL Health Check:
+       - Connection string'i alır
+       - PostgreSQL'e bağlanmayı dener
+       - Basit bir sorgu çalıştırır (`SELECT 1;`)
+       - Sonuç: `Healthy` veya `Unhealthy`
+   - Sonuçlar toplanır
+   - JSON response döner
+
+**Örnek senaryolar:**
+
+**Senaryo 1: Veritabanı çalışıyor**
+```
+1. Kullanıcı: GET /health
+   ↓
+2. Health Check çalışır
+   ↓
+3. PostgreSQL'e bağlanmayı dener
+   ├─ Connection string: "Host=localhost;Port=5432;Database=CatalogDb;..."
+   ├─ Bağlantı başarılı ✅
+   ├─ "SELECT 1;" sorgusu çalıştırılır ✅
+   └─ Sonuç: Healthy
+   ↓
+4. Response:
+   {
+     "status": "Healthy"
+   }
+   HTTP Status: 200 OK
+```
+
+**Senaryo 2: Veritabanı çalışmıyor**
+```
+1. Kullanıcı: GET /health
+   ↓
+2. Health Check çalışır
+   ↓
+3. PostgreSQL'e bağlanmayı dener
+   ├─ Connection string: "Host=localhost;Port=5432;Database=CatalogDb;..."
+   ├─ Bağlantı başarısız ❌ (veritabanı kapalı veya yanlış bilgiler)
+   └─ Exception fırlatılır
+   ↓
+4. Response:
+   {
+     "status": "Unhealthy"
+   }
+   HTTP Status: 503 Service Unavailable
+```
+
+**Senaryo 3: Kubernetes kullanımı**
+```
+Kubernetes: Pod'un sağlıklı olup olmadığını kontrol eder
+   ↓
+GET /health endpoint'ine istek gönderir
+   ↓
+Response alır:
+   ├─ { "status": "Healthy" } → Pod çalışmaya devam eder ✅
+   └─ { "status": "Unhealthy" } → Pod yeniden başlatılır veya trafik kesilir ❌
+```
+
+**Özet:**
+1. `builder.Services.AddHealthChecks().AddNpgSql(...)` ekleyin (ProblemDetails'ten sonra)
+2. `app.MapHealthChecks("/health")` ekleyin (`app.UseHttpsRedirection()` satırından sonra)
+3. Connection string null uyarısı için `!` operatörü kullanın
+
+**Not:** `AddNpgSql` extension method'u `AspNetCore.HealthChecks.NpgSql` paketinden gelir. Paket yüklüyse extension method otomatik olarak kullanılabilir, özel using gerekmez.
+
+**Sonuç:** ✅ Health Checks eklendi
 
 ---
 
 ### Adım 6: ProductsController Oluştur
 
-**Dosya:**
-- `Controllers/ProductsController.cs`
+**Dosya Konumu:**
+- `src/Services/Catalog/Catalog.API/Controllers/ProductsController.cs`
 
-**Ne yapılacak:**
-- Product işlemleri için REST API endpoint'leri oluşturacağız
-- MediatR kullanarak Command/Query'leri çağıracağız
+**Ne yapıldı:**
+- `Controllers/` klasöründe `ProductsController.cs` dosyası oluşturuldu
+- Product işlemleri için REST API endpoint'leri tanımlandı
+- MediatR kullanarak Command/Query'ler çağrılıyor
+- `IMediator` constructor injection ile alınıyor
 
-**Kod Yapısı:**
-```csharp
-[ApiController]
-[Route("api/[controller]")]
-public class ProductsController : ControllerBase
-{
-    private readonly IMediator _mediator;
+**Controller Yapısı:**
+- `[ApiController]` attribute'u eklendi (otomatik model validation, ProblemDetails, vb.)
+- `[Route("api/[controller]")]` ile route tanımlandı (`api/products`)
+- `ControllerBase`'den türüyor (MVC Controller değil, API Controller)
+- Her action method'da `_mediator.Send()` ile Command/Query gönderiliyor
 
-    public ProductsController(IMediator mediator)
-    {
-        _mediator = mediator;
-    }
+**Eklenen Fonksiyonlar ve Görevleri:**
+1. **`GetProducts([FromQuery] GetProductsQuery query)`**
+   - **Görev:** Tüm ürünleri getirir (sayfalama ve filtreleme ile)
+   - **HTTP Method:** GET
+   - **Route:** `/api/products`
+   - **Parametreler:** Query string'den `GetProductsQuery` alır (PageNumber, PageSize, CategoryId)
+   - **MediatR:** `GetProductsQuery` gönderir
+   - **Response:** HTTP 200 OK + `IEnumerable<ProductDto>`
 
-    // GET /api/products
-    [HttpGet]
-    public async Task<ActionResult<IEnumerable<ProductDto>>> GetProducts([FromQuery] GetProductsQuery query)
-    {
-        var products = await _mediator.Send(query);
-        return Ok(products);
-    }
+2. **`GetProductById(Guid id)`**
+   - **Görev:** ID'ye göre tek ürün getirir
+   - **HTTP Method:** GET
+   - **Route:** `/api/products/{id}`
+   - **Parametreler:** Route'tan `Guid id` alır
+   - **MediatR:** `GetProductByIdQuery` gönderir
+   - **Response:** HTTP 200 OK + `ProductDto`
 
-    // GET /api/products/{id}
-    [HttpGet("{id}")]
-    public async Task<ActionResult<ProductDto>> GetProductById(Guid id)
-    {
-        var product = await _mediator.Send(new GetProductByIdQuery { Id = id });
-        return Ok(product);
-    }
+3. **`GetProductsByCategory(Guid categoryId)`**
+   - **Görev:** Belirli bir kategoriye ait ürünleri getirir
+   - **HTTP Method:** GET
+   - **Route:** `/api/products/category/{categoryId}`
+   - **Parametreler:** Route'tan `Guid categoryId` alır
+   - **MediatR:** `GetProductsByCategoryQuery` gönderir
+   - **Response:** HTTP 200 OK + `IEnumerable<ProductDto>`
 
-    // GET /api/products/category/{categoryId}
-    [HttpGet("category/{categoryId}")]
-    public async Task<ActionResult<IEnumerable<ProductDto>>> GetProductsByCategory(Guid categoryId)
-    {
-        var products = await _mediator.Send(new GetProductsByCategoryQuery { CategoryId = categoryId });
-        return Ok(products);
-    }
+4. **`CreateProduct([FromBody] CreateProductCommand command)`**
+   - **Görev:** Yeni ürün oluşturur
+   - **HTTP Method:** POST
+   - **Route:** `/api/products`
+   - **Parametreler:** Request body'den `CreateProductCommand` alır (JSON)
+   - **MediatR:** `CreateProductCommand` gönderir
+   - **Response:** HTTP 201 Created + Location header (`/api/products/{id}`) + `Guid` (Product ID)
 
-    // POST /api/products
-    [HttpPost]
-    public async Task<ActionResult<Guid>> CreateProduct([FromBody] CreateProductCommand command)
-    {
-        var productId = await _mediator.Send(command);
-        return CreatedAtAction(nameof(GetProductById), new { id = productId }, productId);
-    }
+5. **`UpdateProduct(Guid id, [FromBody] UpdateProductCommand command)`**
+   - **Görev:** Mevcut ürünü günceller
+   - **HTTP Method:** PUT
+   - **Route:** `/api/products/{id}`
+   - **Parametreler:** Route'tan `Guid id`, Request body'den `UpdateProductCommand` alır
+   - **MediatR:** `UpdateProductCommand` gönderir (command.Id = id olarak set edilir)
+   - **Response:** HTTP 204 No Content
 
-    // PUT /api/products/{id}
-    [HttpPut("{id}")]
-    public async Task<IActionResult> UpdateProduct(Guid id, [FromBody] UpdateProductCommand command)
-    {
-        command.Id = id;
-        await _mediator.Send(command);
-        return NoContent();
-    }
-
-    // DELETE /api/products/{id}
-    [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteProduct(Guid id)
-    {
-        await _mediator.Send(new DeleteProductCommand { Id = id });
-        return NoContent();
-    }
-}
-```
-
-**Gerekli using'ler:**
-```csharp
-using MediatR;
-using Microsoft.AspNetCore.Mvc;
-using Catalog.API.Dtos;
-using Catalog.API.Features.Products.Queries.GetProducts;
-using Catalog.API.Features.Products.Queries.GetProductById;
-using Catalog.API.Features.Products.Queries.GetProductsByCategory;
-using Catalog.API.Features.Products.Commands.CreateProduct;
-using Catalog.API.Features.Products.Commands.UpdateProduct;
-using Catalog.API.Features.Products.Commands.DeleteProduct;
-```
+6. **`DeleteProduct(Guid id)`**
+   - **Görev:** Ürünü siler
+   - **HTTP Method:** DELETE
+   - **Route:** `/api/products/{id}`
+   - **Parametreler:** Route'tan `Guid id` alır
+   - **MediatR:** `DeleteProductCommand` gönderir
+   - **Response:** HTTP 204 No Content
 
 **Ne işe yarar:**
 - REST API endpoint'leri sağlar
 - HTTP isteklerini MediatR Command/Query'lerine dönüştürür
 - MediatR'dan dönen sonuçları HTTP response'a çevirir
-
-**Endpoint'ler:**
-- `GET /api/products` → Tüm ürünleri getir (sayfalama, filtreleme)
-- `GET /api/products/{id}` → ID'ye göre ürün getir
-- `GET /api/products/category/{categoryId}` → Kategoriye göre ürünleri getir
-- `POST /api/products` → Yeni ürün oluştur
-- `PUT /api/products/{id}` → Ürün güncelle
-- `DELETE /api/products/{id}` → Ürün sil
+- HTTP status code'ları ve response formatlarını yönetir
 
 **Neden gerekli?**
 - API endpoint'leri olmadan uygulama dışarıdan erişilemez
 - Controller, HTTP isteklerini MediatR Command/Query'lerine köprü görevi görür
+- REST API best practices'e uygun HTTP status code'ları döner
 
-**Sonuç:** ⏳ ProductsController oluşturulacak
+**Sonuç:** ✅ ProductsController oluşturuldu
 
 ---
 
 ### Adım 7: CategoriesController Oluştur
 
-**Dosya:**
-- `Controllers/CategoriesController.cs`
+**Dosya Konumu:**
+- `src/Services/Catalog/Catalog.API/Controllers/CategoriesController.cs`
 
-**Ne yapılacak:**
-- Category işlemleri için REST API endpoint'leri oluşturacağız
-- MediatR kullanarak Command/Query'leri çağıracağız
+**Ne yapıldı:**
+- `Controllers/` klasöründe `CategoriesController.cs` dosyası oluşturuldu
+- Category işlemleri için REST API endpoint'leri tanımlandı
+- ProductsController'a benzer yapı
+- MediatR kullanarak Command/Query'ler çağrılıyor
 
-**Kod Yapısı:**
-```csharp
-[ApiController]
-[Route("api/[controller]")]
-public class CategoriesController : ControllerBase
-{
-    private readonly IMediator _mediator;
+**Controller Yapısı:**
+- `[ApiController]` ve `[Route("api/[controller]")]` attribute'ları eklendi
+- `IMediator` constructor injection ile alınıyor
+- 3 endpoint metodu eklendi: GetCategories, GetCategoryById, CreateCategory
 
-    public CategoriesController(IMediator mediator)
-    {
-        _mediator = mediator;
-    }
+**Eklenen Fonksiyonlar ve Görevleri:**
+1. **`GetCategories()`**
+   - **Görev:** Tüm kategorileri getirir
+   - **HTTP Method:** GET
+   - **Route:** `/api/categories`
+   - **Parametreler:** Yok (tüm kategorileri getirir)
+   - **MediatR:** `GetCategoriesQuery` gönderir
+   - **Response:** HTTP 200 OK + `IEnumerable<CategoryDto>`
 
-    // GET /api/categories
-    [HttpGet]
-    public async Task<ActionResult<IEnumerable<CategoryDto>>> GetCategories()
-    {
-        var categories = await _mediator.Send(new GetCategoriesQuery());
-        return Ok(categories);
-    }
+2. **`GetCategoryById(Guid id)`**
+   - **Görev:** ID'ye göre tek kategori getirir
+   - **HTTP Method:** GET
+   - **Route:** `/api/categories/{id}`
+   - **Parametreler:** Route'tan `Guid id` alır
+   - **MediatR:** `GetCategoryByIdQuery` gönderir
+   - **Response:** HTTP 200 OK + `CategoryDto`
 
-    // GET /api/categories/{id}
-    [HttpGet("{id}")]
-    public async Task<ActionResult<CategoryDto>> GetCategoryById(Guid id)
-    {
-        var category = await _mediator.Send(new GetCategoryByIdQuery { Id = id });
-        return Ok(category);
-    }
-
-    // POST /api/categories
-    [HttpPost]
-    public async Task<ActionResult<Guid>> CreateCategory([FromBody] CreateCategoryCommand command)
-    {
-        var categoryId = await _mediator.Send(command);
-        return CreatedAtAction(nameof(GetCategoryById), new { id = categoryId }, categoryId);
-    }
-}
-```
-
-**Gerekli using'ler:**
-```csharp
-using MediatR;
-using Microsoft.AspNetCore.Mvc;
-using Catalog.API.Dtos;
-using Catalog.API.Features.Categories.Queries.GetCategories;
-using Catalog.API.Features.Categories.Queries.GetCategoryById;
-using Catalog.API.Features.Categories.Commands.CreateCategory;
-```
+3. **`CreateCategory([FromBody] CreateCategoryCommand command)`**
+   - **Görev:** Yeni kategori oluşturur
+   - **HTTP Method:** POST
+   - **Route:** `/api/categories`
+   - **Parametreler:** Request body'den `CreateCategoryCommand` alır (JSON, Name property'si içerir)
+   - **MediatR:** `CreateCategoryCommand` gönderir
+   - **Response:** HTTP 201 Created + Location header (`/api/categories/{id}`) + `Guid` (Category ID)
 
 **Ne işe yarar:**
 - Category işlemleri için REST API endpoint'leri sağlar
-- ProductsController'a benzer yapı
+- ProductsController'a benzer yapı ve mantık
+- HTTP isteklerini MediatR Command/Query'lerine dönüştürür
+- Category CRUD işlemlerini yönetir (Create, Read)
 
-**Endpoint'ler:**
-- `GET /api/categories` → Tüm kategorileri getir
-- `GET /api/categories/{id}` → ID'ye göre kategori getir
-- `POST /api/categories` → Yeni kategori oluştur
+**Neden gerekli?**
+- Category yönetimi için API endpoint'leri gerekli
+- ProductsController ile tutarlı yapı
+- Kategori listesi ve kategori oluşturma işlemleri için
 
-**Sonuç:** ⏳ CategoriesController oluşturulacak
+**Sonuç:** ✅ CategoriesController oluşturuldu
 
 ---
 
-### Adım 8: Swagger Konfigürasyonu
+### Adım 8: Controller Servisleri ve Swagger/OpenAPI Konfigürasyonu
 
-**Dosya:**
-- `Program.cs`
+**Dosya Konumu:**
+- `src/Services/Catalog/Catalog.API/Program.cs`
 
-**Ne yapılacak:**
-- Swagger/OpenAPI konfigürasyonu ekleyeceğiz
-- Development ortamında Swagger UI'ı etkinleştireceğiz
+**Ne yapıldı:**
+- Controller servisleri eklendi (`AddControllers()` ve `MapControllers()`)
+- Swagger/OpenAPI için gerekli paket eklendi (`Swashbuckle.AspNetCore`)
+- Program.cs'de Swagger servisleri eklendi
+- Development ortamında Swagger UI middleware'leri eklendi
 
-**Kod (Eklenecek):**
-```csharp
-// Swagger/OpenAPI
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
-{
-    c.SwaggerDoc("v1", new OpenApiInfo 
-    { 
-        Title = "Catalog API", 
-        Version = "v1",
-        Description = "E-ticaret Catalog Service API"
-    });
-});
+**Adım 1: Controller Servisleri Eklendi**
+- **Konum:** `builder.Services.AddOpenApi();` satırından sonra
+- **Eklenen kod:** `builder.Services.AddControllers();`
+- **Ne işe yarar:** Controller'ları DI container'a kaydeder ve kullanılabilir hale getirir
+  - `ProductsController` ve `CategoriesController` gibi Controller'ları bulur
+  - Controller'ları servis olarak kaydeder
+  - Model binding, validation, routing gibi Controller özelliklerini etkinleştirir
+- **Neden gerekli:** Controller'lar olmadan API endpoint'leri çalışmaz
+  - `[ApiController]` attribute'u olan class'ları Controller olarak tanır
+  - HTTP isteklerini Controller action method'larına yönlendirir
+  - Controller'ların dependency injection ile çalışmasını sağlar
+
+**Adım 2: Controller Routing Eklendi**
+- **Konum:** `app.UseHttpsRedirection();` satırından sonra
+- **Eklenen kod:** `app.MapControllers();`
+- **Ne işe yarar:** Controller'ların route'larını HTTP pipeline'a ekler
+  - Controller'lardaki `[Route]` ve `[HttpGet]`, `[HttpPost]` gibi attribute'ları tarar
+  - Route'ları oluşturur (örn: `/api/products`, `/api/categories`)
+  - HTTP isteklerini doğru Controller action method'una yönlendirir
+- **Neden gerekli:** Controller'lar kayıtlı olsa bile route'lar oluşturulmazsa endpoint'ler çalışmaz
+  - `MapControllers()` olmadan Controller'lar görünmez, 404 döner
+  - HTTP istekleri Controller'lara ulaşamaz
+
+**Nasıl çalışır:**
+1. `AddControllers()` → Controller'ları DI container'a kaydeder
+2. `MapControllers()` → Controller route'larını HTTP pipeline'a ekler
+3. HTTP istek geldiğinde → Route matching yapılır
+4. Eşleşen route bulunursa → İlgili Controller action method'u çalışır
+5. Response döner
+
+**Örnek Akış:**
+```
+Client: GET /api/products
+  ↓
+MapControllers() → Route bulunur: ProductsController.GetProducts()
+  ↓
+ProductsController.GetProducts() çalışır
+  ↓
+_mediator.Send(new GetProductsQuery()) → Handler çalışır
+  ↓
+Response: HTTP 200 OK + ProductDto listesi
 ```
 
-**Gerekli using:**
-```csharp
-using Microsoft.OpenApi.Models;
-```
+**Adım 3: Swashbuckle.AspNetCore Paketi Eklendi**
+- **Komut:** `dotnet add package Swashbuckle.AspNetCore`
+- **Ne işe yarar:** Swagger UI ve OpenAPI dokümantasyonu için gerekli paket
+- **Neden gerekli:** API dokümantasyonu ve test arayüzü için
+- **İçerdiği paketler:** SwaggerGen, Swagger, SwaggerUI
 
-**Middleware (app.Build() sonrası, Development ortamında):**
-```csharp
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Catalog API v1");
-        c.RoutePrefix = string.Empty; // Swagger UI'ı root'ta göster
-    });
-}
-```
+**Adım 4: Program.cs'de Swagger Servisleri Eklendi**
+- **Konum:** `builder.Services.AddOpenApi();` satırından sonra
+- **Eklenen kod:**
+  - `AddEndpointsApiExplorer()`: Controller endpoint'lerini Swagger'a ekler
+  - `AddSwaggerGen()`: Swagger dokümantasyonunu oluşturur (API bilgileri ile)
 
 **Ne işe yarar:**
-- **`AddEndpointsApiExplorer()`**: Minimal API endpoint'lerini Swagger'a ekler
-- **`AddSwaggerGen()`**: Swagger dokümantasyonunu oluşturur
-- **`UseSwagger()`**: Swagger JSON endpoint'ini etkinleştirir (`/swagger/v1/swagger.json`)
-- **`UseSwaggerUI()`**: Swagger UI'ı etkinleştirir (tarayıcıda API dokümantasyonu görüntüleme)
+- **`AddEndpointsApiExplorer()`**: Controller'lardaki endpoint'leri otomatik bulur ve Swagger'a ekler
+  - `[HttpGet]`, `[HttpPost]` gibi attribute'ları tarar
+  - Route'ları, parametreleri, response tiplerini toplar
+- **`AddSwaggerGen()`**: Swagger JSON dokümantasyonunu oluşturur
+  - API başlığı, versiyon, açıklama bilgilerini içerir
+  - Endpoint'lerin detaylı dokümantasyonunu oluşturur
 
-**Neden gerekli?**
-- API dokümantasyonu için
+**Neden gerekli:**
+- API dokümantasyonu için (tüm endpoint'ler otomatik dokümante edilir)
 - API test etmek için (Swagger UI'dan direkt test edilebilir)
 - Frontend geliştiriciler için API contract'ını görmek
 
-**Sonuç:** ⏳ Swagger konfigürasyonu yapılacak
+**Adım 5: Swagger UI Middleware'leri Eklendi**
+- **Konum:** `if (app.Environment.IsDevelopment())` bloğu içinde
+- **Eklenen kod:**
+  - `app.UseSwagger()`: Swagger JSON endpoint'ini etkinleştirir (`/swagger/v1/swagger.json`)
+  - `app.UseSwaggerUI()`: Swagger UI'ı etkinleştirir (tarayıcıda görüntüleme)
+
+**Ne işe yarar:**
+- **`UseSwagger()`**: Swagger JSON dosyasını sunar
+  - Endpoint: `/swagger/v1/swagger.json`
+  - OpenAPI 3.0 formatında JSON döner
+  - API client'ları bu JSON'u kullanabilir
+- **`UseSwaggerUI()`**: Swagger UI arayüzünü sunar
+  - Endpoint: `/` (root, `RoutePrefix = string.Empty` sayesinde)
+  - Tarayıcıda API dokümantasyonu görüntülenir
+  - Endpoint'leri test edebilirsiniz (Try it out)
+
+**Neden Development ortamında:**
+- Production'da Swagger UI güvenlik riski oluşturabilir
+- Sadece geliştirme sırasında gerekli
+- Production'da sadece JSON endpoint'i kullanılabilir (opsiyonel)
+
+**Nasıl çalışır:**
+1. Uygulama başladığında Swagger servisleri kaydedilir
+2. Controller'lardaki endpoint'ler otomatik taranır
+3. Swagger JSON dokümantasyonu oluşturulur
+4. Development ortamında Swagger UI erişilebilir olur
+5. Tarayıcıda `http://localhost:5001/` adresine gidildiğinde Swagger UI görüntülenir
+
+**Kullanım:**
+- Tarayıcıda `http://localhost:5001/` adresine git
+- Swagger UI'da tüm endpoint'ler görüntülenir
+- Her endpoint için "Try it out" butonuna tıklayarak test edebilirsin
+- Request/Response örnekleri otomatik gösterilir
+
+**Sonuç:** ✅ Swagger/OpenAPI konfigürasyonu tamamlandı
 
 ---
 
-## 3.6 Bölümü - Tamamlanan Kontroller (Kısmi)
+## 3.6 Bölümü - Tamamlanan Kontroller
 
 ✅ MediatR servisi register edildi (Handler'lar otomatik bulunuyor)
 ✅ MediatR pipeline behavior'lar eklendi (LoggingBehavior, ValidationBehavior)
 ✅ FluentValidation servisi register edildi (Validator'lar otomatik bulunuyor)
 ✅ AutoMapper servisi register edildi (Profile class'ları otomatik bulunuyor)
-⏳ Exception Handler ve ProblemDetails eklenecek (Adım 4)
-⏳ Health Checks eklenecek (Adım 5)
-⏳ ProductsController oluşturulacak (Adım 6)
-⏳ CategoriesController oluşturulacak (Adım 7)
-⏳ Swagger konfigürasyonu yapılacak (Adım 8)
+✅ Exception Handler ve ProblemDetails eklendi (Adım 4)
+✅ Health Checks eklendi (Adım 5)
+✅ ProductsController oluşturuldu (Adım 6)
+✅ CategoriesController oluşturuldu (Adım 7)
+✅ Swagger/OpenAPI konfigürasyonu tamamlandı (Adım 8)
+
+---
+
+## Controller Attribute'ları ve CreatedAtAction - Referans
+
+**Detaylı Açıklamalar:**
+- Controller attribute'ları (`[ApiController]`, `[Route]`, `[HttpGet]`) ve `CreatedAtAction()` metodunun detaylı açıklamaları için: `docs/architecture/eSho-AspController-Arc/documentation/done/faz-3-done/learned-faz-3/controller-attributes-ve-createdataction.md`
+- Bu dokümanda şunlar açıklanır:
+  - `[ApiController]` attribute'unun otomatik davranışları
+  - `[Route("api/[controller]")]` attribute'unun token değiştirme mekanizması
+  - `[HttpGet("{id}")]` attribute'unun route parametresi bağlama
+  - `CreatedAtAction()` metodunun adım adım çalışma prensibi
+  - ASCII diyagramlar ve örnek senaryolar
+
+---
+
+### HTTP Status Code'ları
+
+**Kullanılan Status Code'lar:**
+- `200 OK`: Başarılı GET istekleri (Ok())
+- `201 Created`: Yeni kaynak oluşturuldu (CreatedAtAction())
+- `204 No Content`: Başarılı ama response body yok (NoContent())
+- `400 Bad Request`: Validation hatası (otomatik, [ApiController] sayesinde)
+- `404 Not Found`: Kaynak bulunamadı (NotFoundException → GlobalExceptionHandler)
+- `500 Internal Server Error`: Sunucu hatası (GlobalExceptionHandler)
+
+**Neden Önemli:**
+- REST API best practices'e uygun
+- Client'ın işlem sonucunu anlaması için
+- HTTP standardına uygun response'lar
+
+---
+
+## Öğrenilenler (Faz 3.6 - Controller ve MediatR Entegrasyonu)
+
+### Controller Pattern
+
+**Controller Nedir:**
+- HTTP isteklerini karşılayan class'lar
+- REST API endpoint'lerini tanımlar
+- MediatR ile Handler'lara köprü görevi görür
+
+**Neden Gerekli:**
+- API endpoint'leri olmadan uygulama dışarıdan erişilemez
+- HTTP isteklerini iş mantığına (Handler) bağlar
+
+**Best Practices:**
+- Controller'da iş mantığı olmamalı (Handler'da olmalı)
+- Sadece HTTP isteklerini Command/Query'ye dönüştürmeli
+- HTTP response'ları yönetmeli
+
+---
+
+### MediatR ve Controller Entegrasyonu
+
+**Nasıl Çalışır:**
+1. Client HTTP isteği gönderir
+2. Controller isteği alır
+3. Controller `_mediator.Send(command)` çağrılır
+4. MediatR Handler'ı bulur ve çalıştırır
+5. Handler response döner
+6. Controller HTTP response oluşturur
+
+**Avantajları:**
+- Controller'da iş mantığı yok (Handler'da)
+- Test edilebilirlik (Handler'lar bağımsız test edilebilir)
+- Kod organizasyonu (CQRS pattern)
+- Pipeline behavior'lar (Logging, Validation)
+
+---
+
+### REST API Best Practices
+
+**HTTP Method'ları:**
+- `GET`: Veri okuma (Query)
+- `POST`: Yeni kaynak oluşturma (Command)
+- `PUT`: Kaynak güncelleme (Command)
+- `DELETE`: Kaynak silme (Command)
+
+**HTTP Status Code'ları:**
+- `200 OK`: Başarılı GET
+- `201 Created`: Yeni kaynak oluşturuldu
+- `204 No Content`: Başarılı ama body yok
+- `400 Bad Request`: Validation hatası
+- `404 Not Found`: Kaynak bulunamadı
+- `500 Internal Server Error`: Sunucu hatası
+
+**URL Yapısı:**
+- `/api/products` → Tüm ürünler
+- `/api/products/{id}` → Tek ürün
+- `/api/products/category/{categoryId}` → Kategoriye göre ürünler
 
 ---
 
