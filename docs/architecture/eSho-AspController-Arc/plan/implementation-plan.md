@@ -896,6 +896,103 @@ Gateway: Response'u kullanıcıya iletir
 
 ---
 
+## 🎨 Faz 9: Frontend Uygulaması (Opsiyonel)
+
+### 9.1 Frontend Projesi Oluştur
+**Hedef:** Kullanıcı arayüzü
+
+**Görevler:**
+- [ ] Frontend framework seçimi (React/Vue/Angular/Blazor/Next.js)
+- [ ] Proje oluşturma
+- [ ] Proje yapısını kurma
+- [ ] API client konfigürasyonu (Gateway.API'ye bağlanma)
+
+**Test:** Frontend projesi çalışıyor mu?
+
+---
+
+### 9.2 API Entegrasyonu
+**Hedef:** Backend servislerle iletişim
+
+**Görevler:**
+- [ ] API client oluşturma (Axios/Fetch/HttpClient)
+- [ ] Gateway.API endpoint'lerine bağlanma
+- [ ] Error handling
+- [ ] Loading states
+
+**Test:** API'lerden veri çekiliyor mu?
+
+---
+
+### 9.3 Sayfalar ve Bileşenler
+**Hedef:** Kullanıcı arayüzü sayfaları
+
+**Görevler:**
+- [ ] Ana sayfa (ürün listesi)
+- [ ] Ürün detay sayfası
+- [ ] Sepet sayfası
+- [ ] Sipariş sayfası
+- [ ] Sipariş geçmişi sayfası
+- [ ] Ortak bileşenler (Header, Footer, Navigation)
+
+**Test:** Tüm sayfalar çalışıyor mu?
+
+---
+
+### 9.4 State Management (Opsiyonel)
+**Hedef:** Uygulama durumu yönetimi
+
+**Görevler:**
+- [ ] State management kütüphanesi seçimi (Redux/Zustand/Context API)
+- [ ] Global state yapısı
+- [ ] Sepet state yönetimi
+- [ ] Kullanıcı state yönetimi
+
+**Test:** State yönetimi çalışıyor mu?
+
+---
+
+### 9.5 Styling ve UI/UX
+**Hedef:** Görsel tasarım
+
+**Görevler:**
+- [ ] CSS framework seçimi (Tailwind/Bootstrap/Material-UI)
+- [ ] Responsive tasarım
+- [ ] Dark mode (opsiyonel)
+- [ ] Animasyonlar ve transitions
+
+**Test:** Tasarım responsive ve kullanıcı dostu mu?
+
+---
+
+### 9.6 Docker Entegrasyonu (Opsiyonel)
+**Hedef:** Frontend'i containerize et
+
+**Görevler:**
+- [ ] Dockerfile oluşturma
+- [ ] Docker Compose'a ekleme
+- [ ] Production build konfigürasyonu
+
+**Test:** Frontend container'ı çalışıyor mu?
+
+---
+
+### 9.7 End-to-End Test
+**Hedef:** Tüm sistem (Frontend + Backend) çalışıyor mu?
+
+**Test Senaryoları:**
+- [ ] Ürün listesi görüntüleme
+- [ ] Ürün detayı görüntüleme
+- [ ] Sepete ürün ekleme
+- [ ] Sepeti görüntüleme
+- [ ] Checkout işlemi
+- [ ] Sipariş oluşturma
+- [ ] Sipariş geçmişi görüntüleme
+
+**Sonuç:** ✅ Frontend + Backend entegrasyonu tamamlandı!
+
+---
+
 ## 📊 İlerleme Takibi
 
 ### Tamamlanan Fazlar
@@ -907,6 +1004,7 @@ Gateway: Response'u kullanıcıya iletir
 - [ ] Faz 6: Ordering Service (Basket'ten event alır)
 - [ ] Faz 7: API Gateway
 - [ ] Faz 8: Docker Entegrasyonu
+- [ ] Faz 9: Frontend Uygulaması (Opsiyonel)
 
 ### Şu Anda Neredeyim?
 **Faz:** _______________  
