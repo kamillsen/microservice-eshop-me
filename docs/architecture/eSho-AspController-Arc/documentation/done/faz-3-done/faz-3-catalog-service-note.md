@@ -3041,13 +3041,455 @@ using FluentValidation;
 
 ---
 
+### Adım 3: Program.cs'de AutoMapper Servisini Register Et
+
+**Dosya:**
+- `Program.cs`
+
+**Ne yapıldı:**
+- FluentValidation eklediğin kısımdan hemen sonra AutoMapper servisi eklendi
+- Profile class'larını otomatik bulmak için `AddAutoMapper` kullanıldı
+
+**Kod:**
+```csharp
+// AutoMapper
+builder.Services.AddAutoMapper(typeof(Program).Assembly);
+```
+
+**Gerekli using:**
+```csharp
+// AutoMapper için özel using gerekmez, extension method olarak gelir
+// AutoMapper.Extensions.Microsoft.DependencyInjection paketi ile gelir
+```
+
+**Ne işe yarar:**
+- **`AddAutoMapper`**: Catalog.API assembly'sindeki tüm Profile class'larını (`Profile` base class'ından türeyen) otomatik bulur ve DI container'a kaydeder
+
+  **Nasıl Çalışır?**
+  1. **Reflection ile Tarama**: `typeof(Program).Assembly` ile Catalog.API assembly'sini alır ve reflection kullanarak assembly'deki tüm class'ları tarar
+  2. **Profile Kontrolü**: Her class için `Profile` base class'ından türeyip türemediğini kontrol eder (`typeof(Profile).IsAssignableFrom(type)`)
+  3. **Profile Instance Oluşturma**: `Profile`'dan türeyen class'ların instance'ını oluşturur (constructor çalışır)
+  4. **CreateMap Kuralları Kaydedilir**: Profile constructor'ında tanımlanan `CreateMap` kuralları AutoMapper configuration'a eklenir
+  5. **IMapper Servisi Kaydedilir**: `IMapper` ve `MapperConfiguration` DI container'a kaydedilir (Singleton lifetime)
+
+  **Örnekler:**
+  ```csharp
+  // ✅ BULUNUR ve KAYDEDİLİR - Profile'dan türüyor
+  public class MappingProfile : Profile
+  {
+      public MappingProfile()
+      {
+          CreateMap<CreateProductCommand, Product>();
+          CreateMap<Product, ProductDto>();
+          // Bu constructor çalışır, CreateMap'ler kaydedilir
+      }
+  }
+  
+  // ❌ BULUNMAZ - Profile'dan türemiyor
+  public class ProductDto { }  // Sadece DTO, Profile değil
+  
+  // ❌ BULUNMAZ - Profile'dan türemiyor
+  public class CreateProductHandler : IRequestHandler<CreateProductCommand, Guid> { }  // Handler, Profile değil
+  ```
+
+  **Manuel Kayıt vs Otomatik Kayıt:**
+  ```csharp
+  // ❌ Manuel kayıt (yapmıyoruz, otomatik yapılıyor)
+  var config = new MapperConfiguration(cfg => {
+      cfg.AddProfile<MappingProfile>();
+  });
+  var mapper = config.CreateMapper();
+  builder.Services.AddSingleton<IMapper>(mapper);
+  
+  // ✅ Otomatik kayıt (AddAutoMapper yapıyor)
+  builder.Services.AddAutoMapper(typeof(Program).Assembly);
+  // → Tüm Profile'dan türeyen class'lar otomatik bulunur ve kaydedilir
+  // → Profile constructor'ları çalışır, CreateMap'ler kaydedilir
+  // → IMapper Singleton olarak kaydedilir
+  ```
+
+  **Sonuç:**
+  - `MappingProfile` → Profile instance oluşturulur, constructor çalışır
+  - `CreateMap<CreateProductCommand, Product>()` → Mapping kuralı kaydedilir
+  - `CreateMap<Product, ProductDto>()` → Mapping kuralı kaydedilir
+  - `IMapper` → Singleton olarak DI container'a kaydedilir
+  - Handler'larda `_mapper.Map<T>()` çağrıldığında bu kurallar kullanılır
+
+- **Handler'larda Kullanım**: Handler'larda `IMapper` constructor injection ile alınır ve `_mapper.Map<TDestination>(source)` ile mapping yapılır
+  - Örnek: `var product = _mapper.Map<Product>(command);` → `CreateProductCommand` → `Product` mapping kuralı kullanılır
+  - Örnek: `var productDto = _mapper.Map<ProductDto>(product);` → `Product` → `ProductDto` mapping kuralı kullanılır
+
+**Neden gerekli?**
+- Profile class'larını manuel kaydetmek yerine otomatik bulma (reflection ile)
+- Handler'larda `IMapper` kullanabilmek için DI container'da kayıtlı olmalı
+- Mapping kurallarının tek yerde (MappingProfile) toplanması
+
+**Nasıl Çalışır? (Detaylı Akış):**
+1. **Uygulama Başlangıcı:**
+   - `Program.cs` çalışır
+   - `builder.Services.AddAutoMapper(typeof(Program).Assembly)` çağrılır
+   - AutoMapper, assembly'deki tüm class'ları tarar
+   - `MappingProfile : Profile` bulunur
+   - `MappingProfile` instance oluşturulur (constructor çalışır)
+   - `CreateMap` kuralları AutoMapper configuration'a eklenir
+   - `IMapper` Singleton olarak DI container'a kaydedilir
+
+2. **Handler'da Kullanım:**
+   - Handler constructor'ında `IMapper _mapper` inject edilir
+   - `_mapper.Map<Product>(command)` çağrılır
+   - AutoMapper, `CreateProductCommand` → `Product` mapping kuralını bulur
+   - Mapping kuralına göre dönüşüm yapılır
+   - `Product` instance'ı döner
+
+**Detaylı Açıklama:**
+- AutoMapper'ın nasıl çalıştığına dair detaylı dokümantasyon için: `docs/architecture/eSho-AspController-Arc/documentation/done/faz-3-done/learned-faz-3/automapper-mekanizmasi.md`
+- Bu dokümanda şunlar açıklanır:
+  - `AddAutoMapper` metodunun içeride ne yaptığı
+  - Profile class'larının nasıl bulunduğu
+  - `CreateMap` kurallarının nasıl kaydedildiği
+  - `_mapper.Map<T>()` çağrıldığında hangi kuralın seçildiği
+  - Mapping işleminin adım adım nasıl çalıştığı
+
+**Sonuç:** ✅ AutoMapper servisi register edildi
+
+---
+
+### Adım 4: Program.cs'de Exception Handler ve ProblemDetails Ekle
+
+**Dosya:**
+- `Program.cs`
+
+**Ne yapılacak:**
+- Exception Handler ve ProblemDetails servislerini ekleyeceğiz
+- Exception middleware'i pipeline'a ekleyeceğiz
+
+**Kod (Eklenecek):**
+```csharp
+// Exception Handler
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
+```
+
+**Gerekli using:**
+```csharp
+using BuildingBlocks.Exceptions.Handlers;
+```
+
+**Ne işe yarar:**
+- **`AddExceptionHandler<GlobalExceptionHandler>`**: Global exception handler'ı DI container'a kaydeder
+  - Tüm exception'ları yakalar
+  - Standart HTTP response formatına dönüştürür
+  - `NotFoundException` → 404 Not Found
+  - `ValidationException` → 400 Bad Request
+  - `InternalServerException` → 500 Internal Server Error
+
+- **`AddProblemDetails()`**: RFC 7807 standardına uygun ProblemDetails formatını etkinleştirir
+  - Hata yanıtları standart formatta döner
+  - `type`, `title`, `status`, `detail` gibi alanlar içerir
+
+**Middleware (app.Build() sonrası eklenecek):**
+```csharp
+var app = builder.Build();
+
+// Exception Handler Middleware
+app.UseExceptionHandler();
+```
+
+**Neden gerekli?**
+- Tüm exception'ları merkezi olarak yönetmek
+- Standart hata yanıt formatı (RFC 7807)
+- Handler'larda `throw new NotFoundException(...)` yazınca otomatik 404 dönmesi
+
+**Sonuç:** ⏳ Exception Handler ve ProblemDetails eklenecek
+
+---
+
+### Adım 5: Program.cs'de Health Checks Ekle
+
+**Dosya:**
+- `Program.cs`
+
+**Ne yapılacak:**
+- PostgreSQL veritabanı için health check ekleyeceğiz
+- Health check endpoint'i ekleyeceğiz
+
+**Kod (Eklenecek):**
+```csharp
+// Health Checks
+builder.Services.AddHealthChecks()
+    .AddNpgSql(builder.Configuration.GetConnectionString("Database"));
+```
+
+**Gerekli using:**
+```csharp
+using AspNetCore.HealthChecks.NpgSql;
+```
+
+**Middleware (app.Build() sonrası eklenecek):**
+```csharp
+app.MapHealthChecks("/health");
+```
+
+**Ne işe yarar:**
+- **`AddHealthChecks()`**: Health check servislerini DI container'a kaydeder
+- **`AddNpgSql()`**: PostgreSQL veritabanı bağlantısını kontrol eder
+  - Veritabanına bağlanabilirse → Healthy
+  - Bağlanamazsa → Unhealthy
+
+- **`MapHealthChecks("/health")`**: `/health` endpoint'ini oluşturur
+  - `GET /health` → `{ "status": "Healthy" }` veya `{ "status": "Unhealthy" }`
+
+**Neden gerekli?**
+- Uygulamanın sağlık durumunu kontrol etmek
+- Kubernetes, Docker Swarm gibi orchestration tool'ları için
+- Monitoring ve alerting için
+
+**Sonuç:** ⏳ Health Checks eklenecek
+
+---
+
+### Adım 6: ProductsController Oluştur
+
+**Dosya:**
+- `Controllers/ProductsController.cs`
+
+**Ne yapılacak:**
+- Product işlemleri için REST API endpoint'leri oluşturacağız
+- MediatR kullanarak Command/Query'leri çağıracağız
+
+**Kod Yapısı:**
+```csharp
+[ApiController]
+[Route("api/[controller]")]
+public class ProductsController : ControllerBase
+{
+    private readonly IMediator _mediator;
+
+    public ProductsController(IMediator mediator)
+    {
+        _mediator = mediator;
+    }
+
+    // GET /api/products
+    [HttpGet]
+    public async Task<ActionResult<IEnumerable<ProductDto>>> GetProducts([FromQuery] GetProductsQuery query)
+    {
+        var products = await _mediator.Send(query);
+        return Ok(products);
+    }
+
+    // GET /api/products/{id}
+    [HttpGet("{id}")]
+    public async Task<ActionResult<ProductDto>> GetProductById(Guid id)
+    {
+        var product = await _mediator.Send(new GetProductByIdQuery { Id = id });
+        return Ok(product);
+    }
+
+    // GET /api/products/category/{categoryId}
+    [HttpGet("category/{categoryId}")]
+    public async Task<ActionResult<IEnumerable<ProductDto>>> GetProductsByCategory(Guid categoryId)
+    {
+        var products = await _mediator.Send(new GetProductsByCategoryQuery { CategoryId = categoryId });
+        return Ok(products);
+    }
+
+    // POST /api/products
+    [HttpPost]
+    public async Task<ActionResult<Guid>> CreateProduct([FromBody] CreateProductCommand command)
+    {
+        var productId = await _mediator.Send(command);
+        return CreatedAtAction(nameof(GetProductById), new { id = productId }, productId);
+    }
+
+    // PUT /api/products/{id}
+    [HttpPut("{id}")]
+    public async Task<IActionResult> UpdateProduct(Guid id, [FromBody] UpdateProductCommand command)
+    {
+        command.Id = id;
+        await _mediator.Send(command);
+        return NoContent();
+    }
+
+    // DELETE /api/products/{id}
+    [HttpDelete("{id}")]
+    public async Task<IActionResult> DeleteProduct(Guid id)
+    {
+        await _mediator.Send(new DeleteProductCommand { Id = id });
+        return NoContent();
+    }
+}
+```
+
+**Gerekli using'ler:**
+```csharp
+using MediatR;
+using Microsoft.AspNetCore.Mvc;
+using Catalog.API.Dtos;
+using Catalog.API.Features.Products.Queries.GetProducts;
+using Catalog.API.Features.Products.Queries.GetProductById;
+using Catalog.API.Features.Products.Queries.GetProductsByCategory;
+using Catalog.API.Features.Products.Commands.CreateProduct;
+using Catalog.API.Features.Products.Commands.UpdateProduct;
+using Catalog.API.Features.Products.Commands.DeleteProduct;
+```
+
+**Ne işe yarar:**
+- REST API endpoint'leri sağlar
+- HTTP isteklerini MediatR Command/Query'lerine dönüştürür
+- MediatR'dan dönen sonuçları HTTP response'a çevirir
+
+**Endpoint'ler:**
+- `GET /api/products` → Tüm ürünleri getir (sayfalama, filtreleme)
+- `GET /api/products/{id}` → ID'ye göre ürün getir
+- `GET /api/products/category/{categoryId}` → Kategoriye göre ürünleri getir
+- `POST /api/products` → Yeni ürün oluştur
+- `PUT /api/products/{id}` → Ürün güncelle
+- `DELETE /api/products/{id}` → Ürün sil
+
+**Neden gerekli?**
+- API endpoint'leri olmadan uygulama dışarıdan erişilemez
+- Controller, HTTP isteklerini MediatR Command/Query'lerine köprü görevi görür
+
+**Sonuç:** ⏳ ProductsController oluşturulacak
+
+---
+
+### Adım 7: CategoriesController Oluştur
+
+**Dosya:**
+- `Controllers/CategoriesController.cs`
+
+**Ne yapılacak:**
+- Category işlemleri için REST API endpoint'leri oluşturacağız
+- MediatR kullanarak Command/Query'leri çağıracağız
+
+**Kod Yapısı:**
+```csharp
+[ApiController]
+[Route("api/[controller]")]
+public class CategoriesController : ControllerBase
+{
+    private readonly IMediator _mediator;
+
+    public CategoriesController(IMediator mediator)
+    {
+        _mediator = mediator;
+    }
+
+    // GET /api/categories
+    [HttpGet]
+    public async Task<ActionResult<IEnumerable<CategoryDto>>> GetCategories()
+    {
+        var categories = await _mediator.Send(new GetCategoriesQuery());
+        return Ok(categories);
+    }
+
+    // GET /api/categories/{id}
+    [HttpGet("{id}")]
+    public async Task<ActionResult<CategoryDto>> GetCategoryById(Guid id)
+    {
+        var category = await _mediator.Send(new GetCategoryByIdQuery { Id = id });
+        return Ok(category);
+    }
+
+    // POST /api/categories
+    [HttpPost]
+    public async Task<ActionResult<Guid>> CreateCategory([FromBody] CreateCategoryCommand command)
+    {
+        var categoryId = await _mediator.Send(command);
+        return CreatedAtAction(nameof(GetCategoryById), new { id = categoryId }, categoryId);
+    }
+}
+```
+
+**Gerekli using'ler:**
+```csharp
+using MediatR;
+using Microsoft.AspNetCore.Mvc;
+using Catalog.API.Dtos;
+using Catalog.API.Features.Categories.Queries.GetCategories;
+using Catalog.API.Features.Categories.Queries.GetCategoryById;
+using Catalog.API.Features.Categories.Commands.CreateCategory;
+```
+
+**Ne işe yarar:**
+- Category işlemleri için REST API endpoint'leri sağlar
+- ProductsController'a benzer yapı
+
+**Endpoint'ler:**
+- `GET /api/categories` → Tüm kategorileri getir
+- `GET /api/categories/{id}` → ID'ye göre kategori getir
+- `POST /api/categories` → Yeni kategori oluştur
+
+**Sonuç:** ⏳ CategoriesController oluşturulacak
+
+---
+
+### Adım 8: Swagger Konfigürasyonu
+
+**Dosya:**
+- `Program.cs`
+
+**Ne yapılacak:**
+- Swagger/OpenAPI konfigürasyonu ekleyeceğiz
+- Development ortamında Swagger UI'ı etkinleştireceğiz
+
+**Kod (Eklenecek):**
+```csharp
+// Swagger/OpenAPI
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo 
+    { 
+        Title = "Catalog API", 
+        Version = "v1",
+        Description = "E-ticaret Catalog Service API"
+    });
+});
+```
+
+**Gerekli using:**
+```csharp
+using Microsoft.OpenApi.Models;
+```
+
+**Middleware (app.Build() sonrası, Development ortamında):**
+```csharp
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Catalog API v1");
+        c.RoutePrefix = string.Empty; // Swagger UI'ı root'ta göster
+    });
+}
+```
+
+**Ne işe yarar:**
+- **`AddEndpointsApiExplorer()`**: Minimal API endpoint'lerini Swagger'a ekler
+- **`AddSwaggerGen()`**: Swagger dokümantasyonunu oluşturur
+- **`UseSwagger()`**: Swagger JSON endpoint'ini etkinleştirir (`/swagger/v1/swagger.json`)
+- **`UseSwaggerUI()`**: Swagger UI'ı etkinleştirir (tarayıcıda API dokümantasyonu görüntüleme)
+
+**Neden gerekli?**
+- API dokümantasyonu için
+- API test etmek için (Swagger UI'dan direkt test edilebilir)
+- Frontend geliştiriciler için API contract'ını görmek
+
+**Sonuç:** ⏳ Swagger konfigürasyonu yapılacak
+
+---
+
 ## 3.6 Bölümü - Tamamlanan Kontroller (Kısmi)
 
 ✅ MediatR servisi register edildi (Handler'lar otomatik bulunuyor)
 ✅ MediatR pipeline behavior'lar eklendi (LoggingBehavior, ValidationBehavior)
 ✅ FluentValidation servisi register edildi (Validator'lar otomatik bulunuyor)
-⏳ AutoMapper servisi register edilecek (Adım 3)
-⏳ Exception Handler register edilecek (Adım 4)
+✅ AutoMapper servisi register edildi (Profile class'ları otomatik bulunuyor)
+⏳ Exception Handler ve ProblemDetails eklenecek (Adım 4)
 ⏳ Health Checks eklenecek (Adım 5)
 ⏳ ProductsController oluşturulacak (Adım 6)
 ⏳ CategoriesController oluşturulacak (Adım 7)
