@@ -957,7 +957,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: CatalogDb
     ports:
-      - "5432:5432"
+      - "5436:5432"  # Host port 5436 (sistem PostgreSQL port 5432'de çalıştığı için çakışmayı önlemek için)
     volumes:
       - catalogdb_data:/var/lib/postgresql/data
 
@@ -1034,6 +1034,8 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__Database=Host=catalogdb;Port=5432;Database=CatalogDb;Username=postgres;Password=postgres
+      # Not: Container network içinde Port=5432 (container içindeki port)
+      # Localhost'tan bağlanırken: Host=localhost;Port=5436 (host port)
     depends_on:
       - catalogdb
     ports:
@@ -1602,7 +1604,7 @@ public class DiscountGrpcService
 
 | Servis | Veritabanı | Port | Neden? |
 |--------|------------|------|--------|
-| Catalog | PostgreSQL | 5432 | İlişkisel veri (Products, Categories) |
+| Catalog | PostgreSQL | 5436 | İlişkisel veri (Products, Categories) (Host port: 5436, container port: 5432) |
 | Basket | Redis | 6379 | Hızlı cache, key-value (sepet geçici) |
 | Ordering | PostgreSQL | 5435 | İlişkisel veri (Orders, OrderItems) (5433 kullanılıyordu, 5435'e değiştirildi) |
 | Discount | PostgreSQL | 5434 | İlişkisel veri (Coupons) |
@@ -1874,7 +1876,7 @@ healthcheck:
 
 | Veritabanı | Port | Container Adı |
 |------------|------|---------------|
-| CatalogDb (PostgreSQL) | 5432 | catalogdb |
+| CatalogDb (PostgreSQL) | 5436 | catalogdb (Host port: 5436, container port: 5432 - sistem PostgreSQL ile çakışmayı önlemek için) |
 | OrderingDb (PostgreSQL) | 5435 | orderingdb (5433 kullanılıyordu, 5435'e değiştirildi) |
 | DiscountDb (PostgreSQL) | 5434 | discountdb |
 | BasketDb (Redis) | 6379 | basketdb |

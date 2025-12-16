@@ -421,19 +421,21 @@ Catalog.API/
 ```json
 {
   "ConnectionStrings": {
-    "Database": "Host=localhost;Port=5432;Database=CatalogDb;Username=postgres;Password=postgres"
+    "Database": "Host=localhost;Port=5436;Database=CatalogDb;Username=postgres;Password=postgres"
   }
 }
 ```
 
 **Connection String Parçaları:**
-- `Host=localhost`: PostgreSQL sunucusunun adresi (Docker container için `catalogdb`, local için `localhost`)
-- `Port=5432`: PostgreSQL'in dinlediği port
+- `Host=localhost`: PostgreSQL sunucusunun adresi (Docker container için host port)
+- `Port=5436`: Docker container'ın host portu (container içinde 5432, host'ta 5436 - sistem PostgreSQL ile çakışmaması için)
 - `Database=CatalogDb`: Veritabanı adı
 - `Username=postgres`: Veritabanı kullanıcı adı
 - `Password=postgres`: Veritabanı şifresi
 
-**Not:** Şu anda `localhost` kullanıldı (development için). Production'da `catalogdb` (Docker container adı) kullanılacak.
+**Not:** Docker container (`catalogdb`) port 5436'da çalışıyor (sistem PostgreSQL port 5432'de çalıştığı için). Connection string `localhost:5436` kullanılarak Docker container'daki PostgreSQL'e bağlanıyor.
+
+**Güncelleme (Aralık 2024):** İlk olarak port 5432 kullanılıyordu, ancak sistemdeki PostgreSQL ile port çakışması olduğu için Docker container'ın host portu 5436'ya değiştirildi. Connection string de `Port=5436` olarak güncellendi. Container içindeki port hala 5432'dir (Docker port mapping: `5436:5432`).
 
 **Sonuç:** ✅ Connection string eklendi
 
@@ -3389,7 +3391,7 @@ app.MapHealthChecks("/health");
 2. Health Check çalışır
    ↓
 3. PostgreSQL'e bağlanmayı dener
-   ├─ Connection string: "Host=localhost;Port=5432;Database=CatalogDb;..."
+   ├─ Connection string: "Host=localhost;Port=5436;Database=CatalogDb;..." (Docker container host port)
    ├─ Bağlantı başarılı ✅
    ├─ "SELECT 1;" sorgusu çalıştırılır ✅
    └─ Sonuç: Healthy
@@ -3408,7 +3410,7 @@ app.MapHealthChecks("/health");
 2. Health Check çalışır
    ↓
 3. PostgreSQL'e bağlanmayı dener
-   ├─ Connection string: "Host=localhost;Port=5432;Database=CatalogDb;..."
+   ├─ Connection string: "Host=localhost;Port=5436;Database=CatalogDb;..." (Docker container host port)
    ├─ Bağlantı başarısız ❌ (veritabanı kapalı veya yanlış bilgiler)
    └─ Exception fırlatılır
    ↓

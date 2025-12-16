@@ -165,7 +165,9 @@
 ```
 Host={hostname};Port={port};Database={database};Username={username};Password={password}
 ```
-**Örnek:** `Host=catalogdb;Port=5432;Database=CatalogDb;Username=postgres;Password=postgres`
+**Örnek:** 
+- Container network içinde: `Host=catalogdb;Port=5432;Database=CatalogDb;Username=postgres;Password=postgres`
+- Localhost'tan bağlanırken: `Host=localhost;Port=5436;Database=CatalogDb;Username=postgres;Password=postgres` (Host port: 5436, container port: 5432)
 
 #### Redis
 ```
@@ -319,7 +321,8 @@ amqp://{username}:{password}@{hostname}:{port}
 - RabbitMQ: http://localhost:15673 (guest/guest - 15672 kullanılıyordu, 15673'e değiştirildi)
 - pgAdmin: http://localhost:5050 (admin@admin.com / admin)
   - Her PostgreSQL veritabanı için ayrı server kaydı oluştur:
-    - CatalogDb: host=catalogdb, port=5432, database=CatalogDb, user=postgres, password=postgres
+    - CatalogDb: host=catalogdb, port=5432 (container port), database=CatalogDb, user=postgres, password=postgres
+      - Not: Host port 5436 (sistem PostgreSQL ile çakışmayı önlemek için), container port 5432
     - OrderingDb: host=orderingdb, port=5432, database=OrderingDb, user=postgres, password=postgres
     - DiscountDb: host=discountdb, port=5432, database=DiscountDb, user=postgres, password=postgres
 
