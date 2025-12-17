@@ -804,36 +804,148 @@ docker compose start
 
 #### Yöntem 3: Belirli Bir Container'ı Durdur
 
-**Catalog Veritabanını Durdur:**
+Tek bir container'ı durdurmak istediğinizde bu yöntemi kullanın.
+
+**Docker Compose ile Durdurma (Önerilen):**
 ```bash
-docker stop catalogdb
-# veya
+# Catalog veritabanını durdur
 docker compose stop catalogdb
+
+# Ordering veritabanını durdur
+docker compose stop orderingdb
+
+# Discount veritabanını durdur
+docker compose stop discountdb
+
+# Basket (Redis) durdur
+docker compose stop basketdb
+
+# RabbitMQ durdur
+docker compose stop messagebroker
+
+# pgAdmin durdur
+docker compose stop pgadmin
 ```
 
-**Diğer Container'lar:**
+**Docker CLI ile Durdurma:**
 ```bash
-# Ordering veritabanı
+# Catalog veritabanını durdur
+docker stop catalogdb
+
+# Ordering veritabanını durdur
 docker stop orderingdb
 
-# Discount veritabanı
+# Discount veritabanını durdur
 docker stop discountdb
 
-# Basket (Redis)
+# Basket (Redis) durdur
 docker stop basketdb
 
-# RabbitMQ
+# RabbitMQ durdur
 docker stop messagebroker
 
-# pgAdmin
+# pgAdmin durdur
 docker stop pgadmin
 ```
 
-**Kontrol:**
+**Container Durumunu Kontrol Etme:**
 ```bash
+# Belirli container'ın durumunu kontrol et
 docker ps -a | grep catalogdb
 # Status: Exited olmalı
+
+# Docker Compose ile kontrol
+docker compose ps catalogdb
+
+# Detaylı durum bilgisi
+docker inspect catalogdb --format='{{.State.Status}}'
+# Beklenen: exited
 ```
+
+**Birden Fazla Container'ı Durdurma:**
+```bash
+# Birden fazla container'ı tek komutla durdur
+docker compose stop catalogdb orderingdb discountdb
+
+# Tüm veritabanı container'larını durdur
+docker compose stop catalogdb orderingdb discountdb
+
+# Altyapı container'larını durdur (Redis, RabbitMQ)
+docker compose stop basketdb messagebroker
+```
+
+**Container'ı Durdur ve Kaldır:**
+```bash
+# Container'ı durdur ve kaldır (ama volume korunur)
+docker compose rm -s catalogdb
+# -s: Durdurma işlemi yap (stop)
+
+# Veya önce durdur, sonra kaldır
+docker compose stop catalogdb
+docker compose rm catalogdb
+```
+
+**Container'ı Zorla Durdurma:**
+```bash
+# Normal durdurma çalışmazsa zorla durdur
+docker kill catalogdb
+
+# Veya Docker Compose ile
+docker compose kill catalogdb
+```
+
+**Örnek Senaryolar:**
+
+**Senaryo 1: Sadece Catalog Veritabanını Yeniden Başlatma**
+```bash
+# 1. Durdur
+docker compose stop catalogdb
+
+# 2. Kaldır (volume korunur)
+docker compose rm catalogdb
+
+# 3. Yeniden başlat
+docker compose up -d catalogdb
+
+# 4. Durumu kontrol et
+docker compose ps catalogdb
+```
+
+**Senaryo 2: Veritabanını Temiz Başlangıçla Yeniden Başlatma**
+```bash
+# 1. Durdur ve kaldır
+docker compose stop catalogdb
+docker compose rm catalogdb
+
+# 2. Volume'u sil (DİKKAT: Veriler silinir!)
+docker volume rm microservice-practice-me_catalogdb_data
+
+# 3. Yeniden başlat
+docker compose up -d catalogdb
+```
+
+**Senaryo 3: Sadece pgAdmin'i Durdurma (Veritabanları Çalışır Durumda)**
+```bash
+# pgAdmin'i durdur (veritabanı container'ları çalışmaya devam eder)
+docker compose stop pgadmin
+
+# Durumu kontrol et
+docker compose ps
+# catalogdb, orderingdb, discountdb çalışır durumda olmalı
+# pgadmin durmuş olmalı
+```
+
+**Senaryo 4: Tüm Veritabanlarını Durdur, Diğerleri Çalışır Durumda Kalsın**
+```bash
+# Sadece PostgreSQL container'larını durdur
+docker compose stop catalogdb orderingdb discountdb
+
+# Redis ve RabbitMQ çalışmaya devam eder
+docker compose ps
+# basketdb ve messagebroker çalışır durumda olmalı
+```
+
+**Not:** Container'ı durdurmak verileri silmez. Volume'lar korunur. Verileri silmek için volume'u da silmeniz gerekir.
 
 ---
 
