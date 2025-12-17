@@ -37,7 +37,7 @@ public static class SeedData
                     Name = "iPhone 15",
                     Description = "Apple iPhone 15 128GB",
                     Price = 35000.00m,
-                    ImageUrl = "https://example.com/images/iphone15.jpg",
+                    ImageUrl = "https://images.pexels.com/photos/18525574/pexels-photo-18525574.jpeg",
                     CategoryId = elektronik.Id
                 },
                 new Product
@@ -46,7 +46,7 @@ public static class SeedData
                     Name = "Samsung Galaxy S24",
                     Description = "Samsung Galaxy S24 256GB",
                     Price = 32000.00m,
-                    ImageUrl = "https://example.com/images/samsung-s24.jpg",
+                    ImageUrl = "https://images.pexels.com/photos/15493878/pexels-photo-15493878.jpeg",
                     CategoryId = elektronik.Id
                 },
                 new Product
@@ -55,7 +55,7 @@ public static class SeedData
                     Name = "MacBook Pro",
                     Description = "Apple MacBook Pro 14 inch M3",
                     Price = 55000.00m,
-                    ImageUrl = "https://example.com/images/macbook-pro.jpg",
+                    ImageUrl = "https://images.pexels.com/photos/249538/pexels-photo-249538.jpeg",
                     CategoryId = elektronik.Id
                 },
 
@@ -66,7 +66,7 @@ public static class SeedData
                     Name = "Beyaz T-Shirt",
                     Description = "Rahat kesim pamuklu t-shirt",
                     Price = 150.00m,
-                    ImageUrl = "https://example.com/images/tshirt.jpg",
+                    ImageUrl = "https://images.pexels.com/photos/35203728/pexels-photo-35203728.jpeg",
                     CategoryId = giyim.Id
                 },
                 new Product
@@ -75,7 +75,7 @@ public static class SeedData
                     Name = "Siyah Pantolon",
                     Description = "Klasik kesim siyah pantolon",
                     Price = 450.00m,
-                    ImageUrl = "https://example.com/images/pantolon.jpg",
+                    ImageUrl = "https://images.pexels.com/photos/10360630/pexels-photo-10360630.jpeg",
                     CategoryId = giyim.Id
                 },
                 new Product
@@ -84,7 +84,7 @@ public static class SeedData
                     Name = "Spor Ayakkabı",
                     Description = "Rahat koşu ayakkabısı",
                     Price = 1200.00m,
-                    ImageUrl = "https://example.com/images/ayakkabi.jpg",
+                    ImageUrl = "https://images.pexels.com/photos/2996261/pexels-photo-2996261.jpeg",
                     CategoryId = giyim.Id
                 },
 
@@ -95,7 +95,7 @@ public static class SeedData
                     Name = "Ofis Masası",
                     Description = "Ahşap ofis masası 120x60cm",
                     Price = 2500.00m,
-                    ImageUrl = "https://example.com/images/masa.jpg",
+                    ImageUrl = "https://images.pexels.com/photos/4348395/pexels-photo-4348395.jpeg",
                     CategoryId = evYasam.Id
                 },
                 new Product
@@ -104,7 +104,7 @@ public static class SeedData
                     Name = "Rahat Sandalye",
                     Description = "Ergonomik ofis koltuğu",
                     Price = 1800.00m,
-                    ImageUrl = "https://example.com/images/sandalye.jpg",
+                    ImageUrl = "https://images.pexels.com/photos/116910/pexels-photo-116910.jpeg",
                     CategoryId = evYasam.Id
                 },
                 new Product
@@ -113,7 +113,7 @@ public static class SeedData
                     Name = "LED Lamba",
                     Description = "Modern LED masa lambası",
                     Price = 350.00m,
-                    ImageUrl = "https://example.com/images/lamba.jpg",
+                    ImageUrl = "https://images.pexels.com/photos/7439754/pexels-photo-7439754.jpeg",
                     CategoryId = evYasam.Id
                 }
             };
