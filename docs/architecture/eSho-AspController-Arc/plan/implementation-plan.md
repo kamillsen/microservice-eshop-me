@@ -485,7 +485,7 @@ amqp://{username}:{password}@{hostname}:{port}
 - Health checks ekle (PostgreSQL)
 
 **Test:**
-- Swagger açılıyor mu? (http://localhost:5001/swagger)
+- Swagger açılıyor mu? (http://localhost:5001/)
 - Endpoint'ler çalışıyor mu?
 - Health check çalışıyor mu? (http://localhost:5001/health)
 

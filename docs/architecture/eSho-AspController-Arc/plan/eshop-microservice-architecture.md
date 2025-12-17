@@ -1888,7 +1888,7 @@ healthcheck:
 | **RabbitMQ Management** | http://localhost:15673 | guest / guest (15672 kullanılıyordu, 15673'e değiştirildi) |
 | **RedisInsight** | http://localhost:8001 | - |
 | **pgAdmin** | http://localhost:5050 | admin@admin.com / admin |
-| **Swagger (Catalog)** | http://localhost:5001/swagger | - |
+| **Swagger (Catalog)** | http://localhost:5001/ | - |
 | **Swagger (Basket)** | http://localhost:5002/swagger | - |
 | **Swagger (Ordering)** | http://localhost:5003/swagger | - |
 | **Gateway** | http://localhost:5000 | - |

@@ -619,7 +619,7 @@ app.MapHealthChecks("/health");
 ```
 
 ### Test:
-- Swagger açılıyor mu? (http://localhost:5001/swagger)
+- Swagger açılıyor mu? (http://localhost:5001/)
 - Endpoint'ler çalışıyor mu?
   - GET /api/products
   - GET /api/products/{id}
