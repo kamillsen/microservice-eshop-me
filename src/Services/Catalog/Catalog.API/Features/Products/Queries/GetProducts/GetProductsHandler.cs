@@ -34,7 +34,7 @@ public class GetProductsHandler : IRequestHandler<GetProductsQuery, IEnumerable<
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
 
-        // 4. Entity → DTO mapping
+        // 4. Entity → DTO mapping  -  Product -> ProductDto
         return _mapper.Map<IEnumerable<ProductDto>>(products);
     }
 }
