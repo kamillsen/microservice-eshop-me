@@ -104,13 +104,43 @@ mkdir -p Mapping
 mkdir -p Controllers
 ```
 
-**Açıklama:**
-- `Features/` → CQRS features (Commands ve Queries)
-- `Entities/` → Domain entity'ler (Product, Category)
-- `Data/` → DbContext ve SeedData
-- `Dtos/` → Data Transfer Objects
-- `Mapping/` → AutoMapper profiles
-- `Controllers/` → REST API controllers
+**Klasör Açıklamaları:**
+
+1. **`Features/`** → CQRS pattern için iş mantığı klasörü
+   - **Commands/**: Veriyi değiştiren işlemler (Create, Update, Delete)
+     - Örnek: `CreateProductCommand`, `CreateProductHandler`, `CreateProductValidator`
+     - Yeni ürün ekleme, güncelleme, silme işlemleri burada
+   - **Queries/**: Veriyi okuyan işlemler (Get, GetAll, GetByFilter)
+     - Örnek: `GetProductsQuery`, `GetProductsHandler`
+     - Ürün listesi getirme, ürün detayı getirme işlemleri burada
+   - **Neden?**: Command ve Query'leri ayırarak kod daha organize olur
+
+2. **`Entities/`** → Veritabanı tablolarını temsil eden class'lar
+   - **Örnek**: `Product.cs`, `Category.cs`
+   - Veritabanındaki tablolara karşılık gelir (örn: Products tablosu → Product entity)
+   - **Neden?**: EF Core ile veritabanı işlemleri için gerekli
+
+3. **`Data/`** → Veritabanı bağlantı ve başlangıç verileri
+   - **`CatalogDbContext.cs`**: EF Core DbContext (veritabanı bağlantısı)
+   - **`SeedData.cs`**: Uygulama başlangıcında örnek veriler (kategoriler, ürünler)
+   - **Neden?**: Veritabanı konfigürasyonu ve örnek veriler için
+
+4. **`Dtos/`** → API'den dönen veri formatları (Data Transfer Objects)
+   - **Örnek**: `ProductDto.cs`, `CreateProductDto.cs`
+   - Entity'ler veritabanı formatı, DTO'lar API formatı (daha temiz, güvenli)
+   - **Neden?**: Entity'lerin tüm property'lerini kullanıcıya göstermek istemeyiz
+   - Örnek: Entity'de `Id`, `Name`, `Price`, `InternalNotes` varsa, DTO'da sadece `Id`, `Name`, `Price` gösteririz
+
+5. **`Mapping/`** → Entity ↔ DTO dönüşümü için AutoMapper profilleri
+   - **Örnek**: `MappingProfile.cs`
+   - Entity'yi DTO'ya çevirme kurallarını tanımlar
+   - **Neden?**: Manuel dönüşüm kod yazmak yerine AutoMapper otomatik yapar
+   - Örnek: `Product` entity → `ProductDto` DTO'ya dönüşüm kuralları
+
+6. **`Controllers/`** → REST API endpoint'leri
+   - **Örnek**: `ProductsController.cs`, `CategoriesController.cs`
+   - HTTP isteklerini karşılayan class'lar (GET /api/products, POST /api/products, vb.)
+   - **Neden?**: Kullanıcıların API'ye eriştiği nokta burası
 
 #### Entity'leri oluştur
 **Ne işe yarar:** Veritabanı tablolarını temsil eden entity class'larını oluşturur.
@@ -635,3 +665,4 @@ app.MapHealthChecks("/health");
 25. Tüm endpoint'leri test et
 
 **Bu adımlar tamamlandıktan sonra Faz 4'e (Discount Service) geçilebilir.**
+

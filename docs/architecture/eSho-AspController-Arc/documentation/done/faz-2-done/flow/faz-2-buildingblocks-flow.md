@@ -85,6 +85,59 @@
 - Status Code: Exception tipine göre (404, 400, 500)
 - Body: ProblemDetails JSON
 
+### Exception'ların İlişkisi ve Amacı
+
+**Önemli Not:** `Exceptions/` klasöründeki custom exception'lar (`NotFoundException`, `BadRequestException`, `InternalServerException`) **tam olarak** `GlobalExceptionHandler` tarafından yakalanabilmek için tasarlanmıştır.
+
+#### Nasıl Çalışır?
+
+```
+┌─────────────────────────────────────┐
+│ Exceptions Klasörü                  │
+│ - NotFoundException                 │
+│ - BadRequestException               │
+│ - InternalServerException           │
+└──────────────┬──────────────────────┘
+               │
+               │ Bu exception'lar FİRLATILIR
+               │ throw new NotFoundException(...)
+               ↓
+┌─────────────────────────────────────┐
+│ GlobalExceptionHandler              │
+│ - Bu exception'ları YAKALAR         │
+│ - HTTP status code'a ÇEVİRİR        │
+│   NotFoundException → 404           │
+│   BadRequestException → 400         │
+│   InternalServerException → 500     │
+└─────────────────────────────────────┘
+```
+
+#### Neden Bu Yapı?
+
+- **Standart Exception:** Her zaman 500 Internal Server Error döner (tutarsızlık)
+- **Custom Exception + GlobalExceptionHandler:** Doğru HTTP status code döner (tutarlılık)
+
+#### Örnek:
+
+**Kod:**
+```csharp
+// Servis/Controller'da
+throw new NotFoundException("Product", id);
+```
+
+**GlobalExceptionHandler Yakalar:**
+```csharp
+NotFoundException notFound => new ProblemDetails
+{
+    Status = 404,  // HTTP 404'e çevirir
+    Detail = notFound.Message  // Exception mesajını kullanır
+}
+```
+
+**Sonuç:** HTTP 404 Not Found response
+
+**Özet:** Custom exception'lar, GlobalExceptionHandler tarafından yakalanıp doğru HTTP status code'una dönüştürülmek için vardır. Bu sayede servislerde standart exception kullanmak yerine, anlamlı exception'lar fırlatılır ve otomatik olarak doğru HTTP yanıtına çevrilir.
+
 ### Akış Diagramı
 
 ```mermaid
@@ -168,6 +221,173 @@ sequenceDiagram
    │  }                              │
    └─────────────────────────────────┘
 ```
+
+### GlobalExceptionHandler İç Akışı (Detaylı)
+
+Exception yakalandıktan sonra `GlobalExceptionHandler.TryHandleAsync()` metodunda **adım adım** ne olduğu:
+
+#### TryHandleAsync Metodu - Satır Satır Akış
+
+```
+1. Exception Yakalandı
+   ┌─────────────────────────────────────────────┐
+   │  TryHandleAsync() metodu çağrılır            │
+   │  Parametreler:                              │
+   │  - httpContext: HTTP isteğinin bilgileri    │
+   │  - exception: Yakalanan exception nesnesi   │
+   └──────────────┬──────────────────────────────┘
+                  │
+                  ↓
+2. ILogger ile Exception Loglanır (Satır 24)
+   ┌─────────────────────────────────────────────┐
+   │  _logger.LogError(                           │
+   │    exception,                                │
+   │    "Exception occurred: {Message}",         │
+   │    exception.Message                        │
+   │  )                                          │
+   └──────────────┬──────────────────────────────┘
+                  │
+                  ├─→ Ne Loglanır?
+                  │   - Exception tipi (NotFoundException, vb.)
+                  │   - Exception mesajı ("Entity 'Product' (123) was not found.")
+                  │   - Stack trace (tam hata yolu - dosya, satır numarası)
+                  │   - Inner exception varsa o da
+                  │   - Timestamp (hata zamanı)
+                  │
+                  ├─→ Nerede Saklanır?
+                  │   - Console'a yazılır (geliştirme ortamında)
+                  │   - Dosyaya yazılır (Serilog gibi logger kullanılıyorsa)
+                  │   - Veritabanına kaydedilir (production'da)
+                  │   - Log aggregation tool'a gönderilir (ELK, Seq, vb.)
+                  │
+                  └─→ Neden Loglanır?
+                      ✅ Hata analizi için (production'da debug için)
+                      ✅ Monitoring/Alerting için (hata sayısını izlemek)
+                      ✅ Audit trail için (ne zaman, hangi hatanın olduğu)
+                      ✅ Stack trace kullanıcıya gösterilmez ama loglanır
+                  
+                  ↓
+3. ProblemDetails Oluşturulur (Satır 26)
+   ┌─────────────────────────────────────────────┐
+   │  CreateProblemDetails(exception, httpContext)│
+   └──────────────┬──────────────────────────────┘
+                  │
+                  ├─→ Exception tipine göre switch:
+                  │
+                  │   NotFoundException notFound
+                  │   → Status: 404
+                  │   → Title: "Not Found"
+                  │   → Detail: notFound.Message
+                  │
+                  │   BadRequestException badRequest
+                  │   → Status: 400
+                  │   → Title: "Bad Request"
+                  │   → Detail: badRequest.Message
+                  │
+                  │   InternalServerException internalServer
+                  │   → Status: 500
+                  │   → Title: "Internal Server Error"
+                  │   → Detail: internalServer.Message
+                  │
+                  │   Diğer (catch-all: _)
+                  │   → Status: 500
+                  │   → Title: "An error occurred..."
+                  │   → Detail: "An unexpected error occurred"
+                  │
+                  └─→ Instance: httpContext.Request.Path
+                      (örn: "/api/products/123")
+                  
+                  ↓
+4. HTTP Response Hazırlanır (Satır 28-29)
+   ┌─────────────────────────────────────────────┐
+   │  httpContext.Response.StatusCode = 404       │
+   │  httpContext.Response.ContentType =          │
+   │    "application/problem+json"                │
+   └──────────────┬──────────────────────────────┘
+                  │
+                  ↓
+5. ProblemDetails JSON'a Çevrilir (Satır 31)
+   ┌─────────────────────────────────────────────┐
+   │  JsonSerializer.Serialize(problemDetails)    │
+   │  → JSON string oluşturulur                  │
+   └──────────────┬──────────────────────────────┘
+                  │
+                  ↓
+6. JSON Response'a Yazılır (Satır 32)
+   ┌─────────────────────────────────────────────┐
+   │  await httpContext.Response.WriteAsync(      │
+   │    json,                                     │
+   │    cancellationToken                        │
+   │  )                                          │
+   └──────────────┬──────────────────────────────┘
+                  │
+                  ↓
+7. Response Client'a Döner
+   HTTP 404 Not Found
+   Content-Type: application/problem+json
+   {
+     "type": "https://tools.ietf.org/html/rfc7807",
+     "title": "Not Found",
+     "status": 404,
+     "detail": "Entity \"Product\" (123) was not found.",
+     "instance": "/api/products/123"
+   }
+```
+
+#### ILogger Nedir ve Ne İşe Yarar?
+
+**ILogger**, ASP.NET Core'un yerleşik logging (loglama) mekanizmasıdır.
+
+**Ne İşe Yarar:**
+- Uygulama olaylarını (event'leri) kaydetmek
+- Hataları, bilgilendirmeleri, uyarıları loglamak
+- Production'da uygulamanın durumunu izlemek
+
+**GlobalExceptionHandler'da Kullanımı:**
+
+```csharp
+// Satır 24
+_logger.LogError(exception, "Exception occurred: {Message}", exception.Message);
+```
+
+**Bu kod ne yapar?**
+1. `LogError()`: Log seviyesi "Error" olarak işaretlenir (kritik hata)
+2. `exception`: Exception nesnesinin kendisi loglanır (stack trace dahil)
+3. `"Exception occurred: {Message}"`: Log mesajı (şablon)
+4. `exception.Message`: Mesaj parametresi (örn: "Entity 'Product' (123) was not found.")
+
+**Log Çıktısı Örneği:**
+
+```
+[2024-12-20 10:30:45] [Error] Exception occurred: Entity "Product" (123) was not found.
+System.Exception: Entity "Product" (123) was not found.
+   at BuildingBlocks.Exceptions.Exceptions.NotFoundException..ctor(String name, Object key)
+   at Catalog.API.Services.ProductService.GetByIdAsync(Int32 id)
+   at Catalog.API.Controllers.ProductController.GetProduct(Int32 id)
+   at Microsoft.AspNetCore.Mvc.Infrastructure.ActionMethodExecutor...
+```
+
+**Neden Önemli?**
+- ✅ **Stack Trace Kullanıcıya Gösterilmez:** Güvenlik (detaylı hata bilgisi gizlenir)
+- ✅ **Ama Loglanır:** Developer/Debug için gerekli bilgi saklanır
+- ✅ **Production Monitoring:** Hangi hataların ne sıklıkta olduğu izlenir
+- ✅ **Error Tracking:** Hata analizi ve düzeltme için kritik
+
+#### Özet: Logger vs Kullanıcıya Gösterilen
+
+| Bilgi | Kullanıcıya Gösterilir mi? | Logger'a Yazılır mı? |
+|-------|---------------------------|---------------------|
+| Exception Tipi | ✅ (Title: "Not Found") | ✅ |
+| Exception Mesajı | ✅ (Detail: "Entity...") | ✅ |
+| Stack Trace | ❌ (Güvenlik riski) | ✅ |
+| Inner Exception | ❌ | ✅ |
+| Request Path | ✅ (Instance: "/api/...") | ✅ |
+| Timestamp | ❌ | ✅ |
+| HTTP Status Code | ✅ (Status: 404) | ✅ (log context'inde) |
+
+**Kritik Fark:**
+- **Kullanıcıya:** Güvenli, anlaşılır hata mesajı (ProblemDetails)
+- **Logger'a:** Tam detaylı hata bilgisi (debug için)
 
 ### Örnek Senaryo
 
@@ -513,9 +733,11 @@ sequenceDiagram
     RabbitMQ-->>BasketAPI: Published (Ack)
     BasketAPI-->>BasketAPI: İşine devam eder<br/>(Beklemez)
     
-    RabbitMQ->>OrderingAPI: Event'i consume et
+    RabbitMQ->>OrderingAPI: Event'i consume et<br/>(Push/Polling ile)
     OrderingAPI->>OrderingAPI: Sipariş oluştur
     Note over OrderingAPI: var order = new Order {<br/>  UserName = event.UserName,<br/>  ...<br/>}
+    OrderingAPI-->>RabbitMQ: ACK (Acknowledgment)<br/>İşlem başarılı
+    Note over RabbitMQ: Event queue'dan silindi
 ```
 
 ### Detaylı Akış
@@ -560,16 +782,123 @@ sequenceDiagram
    └──────────────┬──────────────────┘
                   │
                   ↓
-5. Ordering.API Event'i Consume Eder
+5. RabbitMQ, Ordering.API'ye Event'i Gönderir
+   ┌─────────────────────────────────┐
+   │  RabbitMQ                        │
+   │  - Queue'da event var            │
+   │  - Ordering.API consumer olarak │
+   │    bağlı (başlangıçta)          │
+   │  - Event'i consumer'a gönderir  │
+   │    (Push mekanizması veya        │
+   │     Consumer polling yapar)      │
+   └──────────────┬──────────────────┘
+                  │
+                  ↓
+6. Ordering.API Event'i Consume Eder
    ┌─────────────────────────────────┐
    │  Ordering.API                   │
    │  BasketCheckoutConsumer         │
    │  Consume(context) {              │
    │    var event = context.Message; │
    │    // Sipariş oluştur           │
+   │    // İşlem başarılı            │
    │  }                              │
+   └──────────────┬──────────────────┘
+                  │
+                  ↓
+7. Ordering.API, RabbitMQ'ya ACK Gönderir
+   ┌─────────────────────────────────┐
+   │  Ordering.API                   │
+   │  → RabbitMQ'ya ACK gönderir     │
+   │    (Acknowledgment)              │
+   │  "Event'i başarıyla işledim"    │
+   └──────────────┬──────────────────┘
+                  │
+                  ↓
+8. RabbitMQ Event'i Queue'dan Siler
+   ┌─────────────────────────────────┐
+   │  RabbitMQ                        │
+   │  - ACK aldı → Event'i siler     │
+   │  - Queue'dan kalıcı olarak       │
+   │    çıkarılır                     │
    └─────────────────────────────────┘
 ```
+
+### RabbitMQ Consume Mekanizması (Detaylı)
+
+#### RabbitMQ Event'i Ordering.API'ye Nasıl Bildiriyor?
+
+RabbitMQ'da iki mekanizma var:
+
+**1. Push (RabbitMQ → Consumer):**
+- RabbitMQ, consumer'a (Ordering.API) otomatik olarak event gönderir
+- MassTransit arka planda RabbitMQ ile connection kurar
+- Queue'ya event geldiğinde, RabbitMQ consumer'ı uyarır
+- Consumer hazırsa event'i alır
+
+**2. Polling (Consumer → RabbitMQ):**
+- Consumer (Ordering.API) periyodik olarak RabbitMQ'ya "yeni event var mı?" diye sorar
+- MassTransit bu işlemi otomatik yapar
+
+**Gerçekte:** MassTransit genellikle **Push mekanizması** kullanır (daha verimli)
+
+#### ACK (Acknowledgment) Mekanizması Nedir?
+
+**ACK (Acknowledgment)** = "Event'i başarıyla işledim" mesajı
+
+**Nasıl Çalışır:**
+
+```
+1. RabbitMQ → Ordering.API: Event gönderir
+   (Event hala queue'da, ama "Unacknowledged" durumunda)
+
+2. Ordering.API: Event'i işler (sipariş oluşturur)
+   
+3. Ordering.API → RabbitMQ: ACK gönderir
+   "Başarıyla işledim, event'i silebilirsin"
+
+4. RabbitMQ: Event'i queue'dan siler
+```
+
+**ACK Gönderilmezse Ne Olur?**
+
+- Eğer ACK gönderilmezse (timeout veya hata):
+  - RabbitMQ event'i tekrar kuyruğa geri koyar
+  - Başka bir consumer'a gönderir (retry)
+  - Belirli sayıda denemeden sonra "Dead Letter Queue"ya gönderir
+
+**MassTransit'te Otomatik:**
+- MassTransit, consumer başarıyla çalışırsa otomatik ACK gönderir
+- Exception fırlatılırsa ACK gönderilmez (RabbitMQ tekrar dener)
+
+#### Tam Akış Özeti:
+
+```
+Basket.API
+  ↓ Publish(event)
+MassTransit
+  ↓ JSON'a çevir
+RabbitMQ Queue
+  ↓ Event bekler (Ready durumunda)
+  
+RabbitMQ → Ordering.API: Event gönderir (Push)
+  ↓ (Event Unacknowledged durumunda)
+  
+Ordering.API Consumer
+  ↓ Event'i işler (sipariş oluşturur)
+  ↓ Başarılı
+  
+Ordering.API → RabbitMQ: ACK gönderir
+  ↓
+RabbitMQ: Event'i queue'dan siler ✅
+```
+
+**Önemli Notlar:**
+
+1. **Asenkron:** Basket.API, Ordering.API'nin işlemi bitirmesini beklemez
+2. **Güvenilirlik:** ACK mekanizması sayesinde event kaybolmaz
+3. **Retry:** ACK gönderilmezse event tekrar denenir
+4. **Scalability:** Birden fazla Ordering.API instance'ı varsa, RabbitMQ event'i bunlardan birine gönderir (load balancing)
 
 ### Event Yapısı
 
@@ -646,19 +975,19 @@ graph TD
     A[Client: Checkout Request] --> B[Basket.API Controller]
     B --> C[MediatR: CreateOrderCommand]
     
-    C --> D[LoggingBehavior]
+    C --> D[LoggingBehavior: Request Loglanır]
     D --> E[Request Loglanır]
-    E --> F[ValidationBehavior]
+    E --> F[ValidationBehavior: Request Doğrulama]
     F --> G{Validation Başarılı?}
     
     G -->|Hayır| H[ValidationException]
-    H --> I[GlobalExceptionHandler]
+    H --> I[GlobalExceptionHandler: Hataları Yakala]
     I --> J[ProblemDetails Response]
     
     G -->|Evet| K[CreateOrderHandler]
-    K --> L[İş Mantığı]
+    K --> L[CreateOrderHandler: İş Mantığı]
     L --> M[BasketCheckoutEvent Oluştur]
-    M --> N[MassTransit: Publish]
+    M --> N[MassTransit: Event Publish]
     N --> O[RabbitMQ Queue]
     
     K --> P[LoggingBehavior]
@@ -667,11 +996,6 @@ graph TD
     
     O --> S[Ordering.API Consumer]
     S --> T[Sipariş Oluşturulur]
-    
-    style D fill:#e1f5ff
-    style F fill:#e1f5ff
-    style I fill:#ffe1e1
-    style N fill:#e1ffe1
 ```
 
 ### Detaylı Adım Adım Akış
