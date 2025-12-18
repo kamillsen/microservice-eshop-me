@@ -97,6 +97,62 @@ Burada:
 
 ---
 
+## ASCII “Business Logic Diagram” örneği (projeden)
+
+Bu projede “business logic diagram” isteği mantıklı; ama en faydalı kullanım için diagramı ikiye ayırmak iyi olur:
+
+- **Business Flow (rule/decision odaklı)**: “İş nasıl çalışıyor?” (domain kararları)
+- **Technical Flow (katman akışı)**: “Kod nereden nereye gidiyor?” (debug için)
+
+### Örnek 1 — Catalog: Ürün Listeleme (Business Flow)
+
+> Domain davranışı: filtre + sayfalama + sonuç döndürme
+
+```
+GetProducts
+  |
+  +-- CategoryId var mı?
+  |      |-- Evet  -> sadece o kategori ürünleri
+  |      '-- Hayır -> tüm ürünler
+  |
+  +-- Sayfalama uygula (PageNumber, PageSize)
+  |
+  '-- Ürünleri döndür
+```
+
+### Örnek 2 — Catalog: Ürün Listeleme (Technical Flow)
+
+> Debug/akış görünürlüğü: Controller → MediatR → Pipeline → Handler → DB → DTO
+
+```
+HTTP GET /api/products
+      |
+      v
+ProductsController
+      |
+      v
+IMediator.Send(GetProductsQuery)
+      |
+      v
+Pipeline:
+  LoggingBehavior
+  ValidationBehavior
+      |
+      v
+GetProductsHandler
+      |
+      v
+EF Core Query -> PostgreSQL (catalogdb)
+      |
+      v
+AutoMapper: Product -> ProductDto
+      |
+      v
+HTTP 200 OK (JSON)
+```
+
+---
+
 ## Debug yaparken pratik öneri
 
 “İş mantığı nerde çalışıyor?” sorusunun en hızlı cevabı:
