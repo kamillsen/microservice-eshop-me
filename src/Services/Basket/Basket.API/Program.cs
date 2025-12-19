@@ -1,3 +1,9 @@
+using Basket.API.Data;
+using Basket.API.GrpcServices;
+using Discount.Grpc.Protos;
+using Grpc.Net.Client;
+using StackExchange.Redis;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Controllers
@@ -14,6 +20,27 @@ builder.Services.AddSwaggerGen(c =>
         Description = "E-ticaret Basket Service API - Sepet yönetimi için REST API"
     });
 });
+
+// Redis
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+{
+    var configuration = builder.Configuration.GetConnectionString("Redis");
+    return ConnectionMultiplexer.Connect(configuration!);
+});
+
+// Repository
+builder.Services.AddScoped<IBasketRepository, BasketRepository>();
+
+// gRPC Client
+builder.Services.AddSingleton<DiscountProtoService.DiscountProtoServiceClient>(sp =>
+{
+    var address = builder.Configuration["GrpcSettings:DiscountUrl"]!;
+    var channel = GrpcChannel.ForAddress(address);
+    return new DiscountProtoService.DiscountProtoServiceClient(channel);
+});
+
+// DiscountGrpcService
+builder.Services.AddScoped<DiscountGrpcService>();
 
 var app = builder.Build();
 

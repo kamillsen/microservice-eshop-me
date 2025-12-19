@@ -170,3 +170,5 @@ Template'den gelen kodu kaldırıp, Catalog.API'deki gibi Swashbuckle kullanacak
 - **Sorun:** Basket.API projesi oluşturulurken yaşandı
 - **Çözüm:** Program.cs Swashbuckle kullanacak şekilde güncellendi
 
+
+
