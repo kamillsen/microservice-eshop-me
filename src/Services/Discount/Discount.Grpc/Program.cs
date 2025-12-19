@@ -1,4 +1,5 @@
 using Discount.Grpc.Data;
+using Discount.Grpc.Services; // Added for DiscountService
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -28,9 +29,11 @@ using (var scope = app.Services.CreateScope())
     await SeedData.InitializeAsync(context);
 }
 
-// Configure the HTTP request pipeline.
-// TODO: MapGrpcService<DiscountService> will be added later
-app.MapGet("/", () => "Communication with gRPC endpoints must be made through a gRPC client. To learn how to create a client, visit: https://go.microsoft.com/fwlink/?linkid=2086909");
+       // Configure the HTTP request pipeline.
+       // gRPC servisini map et
+       app.MapGrpcService<DiscountService>();
+       
+       app.MapGet("/", () => "Communication with gRPC endpoints must be made through a gRPC client. To learn how to create a client, visit: https://go.microsoft.com/fwlink/?linkid=2086909");
 
 // Health Checks
 app.MapHealthChecks("/health");
