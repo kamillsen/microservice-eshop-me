@@ -6,6 +6,25 @@ using MediatR;
 
 namespace Basket.API.Features.Basket.Commands.CheckoutBasket;
 
+/// <summary>
+/// CHECKOUTBASKET HANDLER - COMMAND (Yazma İşlemi + Event Publishing)
+/// 
+/// NE ZAMAN ÇALIŞIR:
+/// - Kullanıcı "Siparişi Tamamla" butonuna bastığında
+/// - Ödeme sayfasında sipariş onaylandığında
+/// - Frontend: POST /api/baskets/checkout endpoint'i çağrıldığında
+/// 
+/// NE YAPAR:
+/// - Sepeti Redis/PostgreSQL'den okur
+/// - BasketCheckoutEvent oluşturur (sipariş bilgileri ile)
+/// - Event'i RabbitMQ'ya gönderir (Ordering Service bu event'i dinler ve sipariş oluşturur)
+/// - Sepeti siler (checkout edildiği için artık gerekli değil)
+/// 
+/// ÖNEMLİ: 
+/// - Bu handler VERİ DEĞİŞTİRİR (sepet silinir)
+/// - RabbitMQ'ya event gönderir (Ordering Service için)
+/// - Microservice mimarisinde servisler arası iletişim için event-driven pattern kullanılır
+/// </summary>
 public class CheckoutBasketHandler : IRequestHandler<CheckoutBasketCommand, bool>
 {
     private readonly IBasketRepository _repository;
@@ -27,28 +46,35 @@ public class CheckoutBasketHandler : IRequestHandler<CheckoutBasketCommand, bool
 
     public async Task<bool> Handle(CheckoutBasketCommand request, CancellationToken cancellationToken)
     {
-        // 1. Sepeti Redis'ten al
+        // ADIM 1: Sepeti Redis'ten al (cache'den hızlı okuma)
+        // Redis'te yoksa PostgreSQL'den alır
         var basket = await _repository.GetBasket(request.UserName);
         if (basket == null)
         {
             _logger.LogWarning("Basket not found for {UserName}", request.UserName);
-            return false;
+            return false; // Sepet yoksa checkout yapılamaz
         }
 
-        // 2. Event oluştur
+        // ADIM 2: BasketCheckoutEvent oluştur
+        // Bu event, Ordering Service'in sipariş oluşturması için gerekli tüm bilgileri içerir
         var eventMessage = _mapper.Map<BasketCheckoutEvent>(request);
-        eventMessage = eventMessage with { TotalPrice = basket.TotalPrice };
+        eventMessage = eventMessage with { TotalPrice = basket.TotalPrice }; // Sepetten toplam fiyatı ekle
 
-        // 3. RabbitMQ'ya gönder
+        // ADIM 3: Event'i RabbitMQ'ya gönder
+        // RabbitMQ bir message broker'dır (mesaj kuyruğu)
+        // Ordering Service bu event'i dinler ve sipariş oluşturur
+        // Bu sayede Basket Service ve Ordering Service birbirinden bağımsız çalışır (loosely coupled)
         await _publishEndpoint.Publish(eventMessage, cancellationToken);
 
         _logger.LogInformation("BasketCheckoutEvent published for {UserName}. TotalPrice: {TotalPrice}",
             request.UserName, eventMessage.TotalPrice);
 
-        // 4. Sepeti sil
+        // ADIM 4: Sepeti sil
+        // Checkout tamamlandığı için sepet artık gerekli değil
+        // Hem Redis'ten hem PostgreSQL'den silinir
         await _repository.DeleteBasket(request.UserName);
 
-        return true;
+        return true; // Checkout başarılı
     }
 }
 

@@ -4,6 +4,109 @@ Bu dokümanda Basket Service'te gerçekleştirilen iki temel işlemin detaylı a
 
 ---
 
+## 📌 Handler'lar Ne Zaman Çalışır? - Hızlı Referans
+
+### GetBasketHandler (Query - Okuma)
+**Ne Zaman Çalışır:**
+- Kullanıcı sepete bakmak istediğinde
+- Sepet sayfası yüklendiğinde
+- Frontend: `GET /api/baskets/{userName}` endpoint'i çağrıldığında
+
+**Ne Yapar:**
+- Sepeti Redis'ten alır (cache'den hızlı okuma)
+- Redis'te yoksa PostgreSQL'den alır ve Redis'e cache'ler
+- Her ürün için Discount gRPC servisinden indirim sorgular
+- Toplam indirimi hesaplar ve fiyattan düşer
+- Sepet bilgisini DTO formatında döner
+
+**ÖNEMLİ:** Bu handler VERİ DEĞİŞTİRMEZ, sadece okur ve gösterir.
+
+### StoreBasketHandler (Command - Yazma)
+**Ne Zaman Çalışır:**
+- Kullanıcı sepete ürün eklediğinde
+- Sepetteki ürün miktarını değiştirdiğinde
+- Sepet güncellendiğinde
+- Frontend: `POST /api/baskets` endpoint'i çağrıldığında
+
+**Ne Yapar:**
+- Gelen sepet verisini (DTO) Entity'ye çevirir
+- Sepeti PostgreSQL'e kaydeder (kalıcı depolama - source of truth)
+- Sepeti Redis'e cache'ler (hızlı erişim için)
+- Mevcut sepet varsa günceller, yoksa yeni oluşturur
+
+**ÖNEMLİ:** Bu handler VERİ DEĞİŞTİRİR (sepet kaydedilir/güncellenir).
+
+### CheckoutBasketHandler (Command - Yazma + Event)
+**Ne Zaman Çalışır:**
+- Kullanıcı "Siparişi Tamamla" butonuna bastığında
+- Ödeme sayfasında sipariş onaylandığında
+- Frontend: `POST /api/baskets/checkout` endpoint'i çağrıldığında
+
+**Ne Yapar:**
+- Sepeti Redis/PostgreSQL'den okur
+- BasketCheckoutEvent oluşturur (sipariş bilgileri ile)
+- Event'i RabbitMQ'ya gönderir (Ordering Service bu event'i dinler ve sipariş oluşturur)
+- Sepeti siler (checkout edildiği için artık gerekli değil)
+
+**ÖNEMLİ:** 
+- Bu handler VERİ DEĞİŞTİRİR (sepet silinir)
+- RabbitMQ'ya event gönderir (Ordering Service için)
+- Microservice mimarisinde servisler arası iletişim için event-driven pattern kullanılır
+
+### DeleteBasketHandler (Command - Yazma)
+**Ne Zaman Çalışır:**
+- Kullanıcı sepeti manuel olarak silmek istediğinde
+- Admin panelinden sepet silindiğinde
+- Frontend: `DELETE /api/baskets/{userName}` endpoint'i çağrıldığında
+
+**Ne Yapar:**
+- Sepeti PostgreSQL'den siler (kalıcı depolamadan)
+- Sepeti Redis'ten siler (cache'den)
+- Silme işleminin başarılı olup olmadığını döner
+
+**ÖNEMLİ:** Bu handler VERİ DEĞİŞTİRİR (sepet silinir). CheckoutBasketHandler içinde de sepet silinir, ama bu handler manuel silme için.
+
+---
+
+## Tipik E-ticaret Alışveriş Akışı
+
+```
+1. Kullanıcı ürün ekler
+   ↓
+   StoreBasketHandler çalışır (sepet kaydedilir)
+
+2. Kullanıcı sepete bakar
+   ↓
+   GetBasketHandler çalışır (sepet + indirimler gösterilir)
+
+3. Kullanıcı tekrar ürün ekler
+   ↓
+   StoreBasketHandler çalışır (sepet güncellenir)
+
+4. Kullanıcı sepete tekrar bakar
+   ↓
+   GetBasketHandler çalışır (güncel sepet gösterilir)
+
+5. Kullanıcı "Siparişi Tamamla" der
+   ↓
+   CheckoutBasketHandler çalışır (event gönderilir, sepet silinir)
+   ↓
+   RabbitMQ → Ordering Service event'i alır ve sipariş oluşturur
+```
+
+---
+
+## Handler'lar Arası İlişkiler
+
+| Handler | Tip | Veri Değişikliği | Event Gönderimi | İndirim Hesaplama |
+|---------|-----|------------------|-----------------|-------------------|
+| **GetBasketHandler** | Query | ❌ Hayır | ❌ Hayır | ✅ Evet |
+| **StoreBasketHandler** | Command | ✅ Evet | ❌ Hayır | ❌ Hayır |
+| **DeleteBasketHandler** | Command | ✅ Evet | ❌ Hayır | ❌ Hayır |
+| **CheckoutBasketHandler** | Command | ✅ Evet | ✅ Evet (RabbitMQ) | ❌ Hayır |
+
+---
+
 ## 1. SEPETİ AÇMA (GetBasket) AKIŞI
 
 ```
