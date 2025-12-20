@@ -712,7 +712,7 @@ Basket Service, kullanıcıların **alışveriş sepetini** yönetir. Sepete ür
 | Özellik | Değer |
 |---------|-------|
 | **Port** | 8080 (internal) |
-| **Database** | Redis (Key-Value, hızlı erişim) |
+| **Database** | Redis + PostgreSQL (Cache-aside pattern) |
 | **Pattern** | CQRS + MediatR |
 | **gRPC Client** | Discount.Grpc (indirim sorgulama) |
 | **Publishes** | BasketCheckoutEvent (RabbitMQ) |
@@ -724,10 +724,12 @@ DELETE /api/baskets/{userName}          # DeleteBasketCommand (Sepeti sil)
 POST   /api/baskets/checkout            # CheckoutBasketCommand (Ödeme - RabbitMQ event)
 ```
 
-**Neden Redis?**
-- Sepet geçici veri (kullanıcı çıkış yapınca silinebilir)
-- Çok hızlı okuma/yazma gerekiyor
-- Key-Value yapısı sepet için ideal (`basket:user1` → JSON)
+**Neden Redis + PostgreSQL?**
+- **Redis (Cache):** Hızlı okuma/yazma için (kullanıcı deneyimi)
+- **PostgreSQL (Source of Truth):** Veri kalıcılığı için (veri kaybı riski düşük)
+- **Cache-aside Pattern:** Önce Redis'e bak, yoksa PostgreSQL'den al ve cache'le
+- Redis down olsa bile PostgreSQL'den okur (yavaş ama çalışır)
+- Sepet geçmişi tutulabilir (analiz için)
 
 ---
 
@@ -1605,7 +1607,7 @@ public class DiscountGrpcService
 | Servis | Veritabanı | Port | Neden? |
 |--------|------------|------|--------|
 | Catalog | PostgreSQL | 5436 | İlişkisel veri (Products, Categories) (Host port: 5436, container port: 5432) |
-| Basket | Redis | 6379 | Hızlı cache, key-value (sepet geçici) |
+| Basket | Redis + PostgreSQL | 6379, 5437 | Redis (cache) + PostgreSQL (source of truth) - Cache-aside pattern |
 | Ordering | PostgreSQL | 5435 | İlişkisel veri (Orders, OrderItems) (5433 kullanılıyordu, 5435'e değiştirildi) |
 | Discount | PostgreSQL | 5434 | İlişkisel veri (Coupons) |
 
@@ -1621,8 +1623,10 @@ Her microservice'in kendi veritabanı var:
        │                    │                    │
        ▼                    ▼                    ▼
 ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│  PostgreSQL  │     │    Redis     │     │  PostgreSQL  │
-│  (CatalogDb) │     │              │     │ (OrderingDb) │
+│  PostgreSQL  │     │  Redis +     │     │  PostgreSQL  │
+│  (CatalogDb) │     │  PostgreSQL  │     │ (OrderingDb) │
+│              │     │  (Cache +    │     │              │
+│              │     │   Source)    │     │              │
 └──────────────┘     └──────────────┘     └──────────────┘
 ```
 
@@ -1835,7 +1839,7 @@ src/BuildingBlocks/
 | Servis | Health Check | Paket |
 |--------|--------------|-------|
 | **Catalog.API** | PostgreSQL | `AspNetCore.HealthChecks.NpgSql` |
-| **Basket.API** | Redis | `AspNetCore.HealthChecks.Redis` |
+| **Basket.API** | Redis + PostgreSQL | `AspNetCore.HealthChecks.Redis`, `AspNetCore.HealthChecks.NpgSql` |
 | **Ordering.API** | PostgreSQL + RabbitMQ | `AspNetCore.HealthChecks.NpgSql`, `AspNetCore.HealthChecks.RabbitMQ` |
 | **Discount.Grpc** | PostgreSQL | `AspNetCore.HealthChecks.NpgSql` |
 | **Gateway.API** | Downstream services | `AspNetCore.HealthChecks.Uris` |
@@ -1880,6 +1884,7 @@ healthcheck:
 | OrderingDb (PostgreSQL) | 5435 | orderingdb (5433 kullanılıyordu, 5435'e değiştirildi) |
 | DiscountDb (PostgreSQL) | 5434 | discountdb |
 | BasketDb (Redis) | 6379 | basketdb |
+| BasketDb (PostgreSQL) | 5437 | basketpostgres (Host port: 5437, container port: 5432) |
 
 ### UI & Yönetim Panelleri
 

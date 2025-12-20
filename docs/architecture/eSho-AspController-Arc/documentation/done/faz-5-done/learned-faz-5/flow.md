@@ -70,18 +70,34 @@ Bu dokümanda Basket Service'te gerçekleştirilen iki temel işlemin detaylı a
                                       │
                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  📁 BasketRepository.cs (Satır 18-26)                                       │
+│  📁 BasketRepository.cs (Satır 18-50) - Cache-aside Pattern                │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  Adım 1: Önce Redis'e Bak (Cache)                                           │
 │  ────────────────────────────────────────────────────────────────────────   │
 │  • Redis'e bağlanır (IConnectionMultiplexer üzerinden)                     │
 │  • Key: "basket:{userName}" (örn: "basket:alice")                           │
 │  • IDatabase.StringGetAsync() ile Redis'ten veri çeker                      │
-│  • JSON string'i ShoppingCart entity'sine deserialize eder                 │
+│  • Cache'te varsa → Direkt döner (hızlı) ✅                                 │
 │                                                                              │
 │  Kod:                                                                        │
-│  var basket = await _database.StringGetAsync($"basket:{userName}");         │
-│  return JsonSerializer.Deserialize<ShoppingCart>(basket!);                  │
+│  var cached = await _redis.StringGetAsync($"basket:{userName}");           │
+│  if (!cached.IsNullOrEmpty)                                                  │
+│      return JsonSerializer.Deserialize<ShoppingCart>(cached!);              │
 │                                                                              │
-│  ⚠️ Eğer sepet yoksa → null döner                                           │
+│  Adım 2: Redis'te Yoksa PostgreSQL'den Al                                    │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  • BasketDbContext kullanılır (EF Core)                                     │
+│  • ShoppingCarts tablosundan okur (Include ile Items yüklenir)             │
+│  • PostgreSQL'den aldıktan sonra Redis'e cache'le (24 saat TTL)            │
+│                                                                              │
+│  Kod:                                                                        │
+│  var basket = await _context.ShoppingCarts                                  │
+│      .Include(x => x.Items)                                                 │
+│      .FirstOrDefaultAsync(x => x.UserName == userName);                      │
+│  if (basket != null)                                                        │
+│      await _redis.StringSetAsync(..., TimeSpan.FromHours(24));            │
+│                                                                              │
+│  ⚠️ Redis down olursa → Sadece PostgreSQL'den okur (yavaş ama çalışır)     │
 └─────────────────────────────────────────────────────────────────────────────┘
                                       │
                                       ▼
@@ -369,24 +385,46 @@ Bu dokümanda Basket Service'te gerçekleştirilen iki temel işlemin detaylı a
                                       │
                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  📁 BasketRepository.cs (Satır 28-36)                                       │
+│  📁 BasketRepository.cs (Satır 52-100) - Cache-aside Pattern                │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  Adım 1: PostgreSQL'e Yaz (Source of Truth)                                 │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  • BasketDbContext kullanılır (EF Core)                                     │
+│  • Mevcut sepet var mı kontrol et                                           │
+│  • Yoksa → Add (yeni sepet)                                                 │
+│  • Varsa → Update (mevcut item'ları sil, yeni item'ları ekle)              │
+│  • SaveChangesAsync() → PostgreSQL'e kaydet                                │
+│                                                                              │
+│  Kod:                                                                        │
+│  var existing = await _context.ShoppingCarts                                 │
+│      .Include(x => x.Items)                                                │
+│      .FirstOrDefaultAsync(x => x.UserName == basket.UserName);              │
+│  if (existing == null)                                                      │
+│      _context.ShoppingCarts.Add(basket);                                    │
+│  else                                                                        │
+│      _context.ShoppingCarts.Update(existing);                               │
+│  await _context.SaveChangesAsync();                                          │
+│                                                                              │
+│  Adım 2: Redis'e Cache'le                                                   │
 │  ────────────────────────────────────────────────────────────────────────   │
 │  • ShoppingCart entity'sini JSON'a serialize eder                           │
 │  • Key: "basket:{userName}" (örn: "basket:alice")                           │
-│  • IDatabase.StringSetAsync() ile Redis'e kaydeder                          │
-│  • Redis'ten tekrar okuyup doğrular (GetBasket)                             │
+│  • IDatabase.StringSetAsync() ile Redis'e cache'le (24 saat TTL)           │
 │                                                                              │
 │  Kod:                                                                        │
-│  var serializedBasket = JsonSerializer.Serialize(basket);                   │
-│  await _database.StringSetAsync($"basket:{basket.UserName}", ...);         │
-│  return await GetBasket(basket.UserName) ?? basket;                        │
+│  var json = JsonSerializer.Serialize(savedBasket);                          │
+│  await _redis.StringSetAsync($"basket:{basket.UserName}", json,             │
+│      TimeSpan.FromHours(24));                                               │
+│                                                                              │
+│  ⚠️ Redis down olursa → Sadece log'la, PostgreSQL'e yazıldı zaten          │
 │                                                                              │
 │  📝 Redis'te saklanan format:                                                │
 │  Key: "basket:alice"                                                         │
 │  Value: {                                                                    │
+│    "id": "guid",                                                            │
 │    "userName": "alice",                                                      │
 │    "items": [                                                                │
-│      { "productId": "1", "productName": "iPhone 15", ... }                  │
+│      { "id": "guid", "productId": "1", "productName": "iPhone 15", ... }   │
 │    ]                                                                         │
 │  }                                                                           │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -394,16 +432,22 @@ Bu dokümanda Basket Service'te gerçekleştirilen iki temel işlemin detaylı a
                                       ▼
                     ┌─────────────────────────────────┐
                     │                                 │
-            ┌───────┴───────┐              ┌──────────┴──────────┐
-            │     Redis      │              │  IConnectionMultiplexer│
-            │   Database     │◄─────────────│  (Singleton)        │
-            │                │              │                      │
-            │  Key:          │              │  • Bağlantı havuzu   │
-            │  "basket:alice"│              │  • Thread-safe       │
-            │                │              │  • Paylaşılan bağlantı│
-            │  Value: JSON   │              │                      │
-            │  { ... }       │              │                      │
-            └───────────────┘              └──────────────────────┘
+            ┌───────┴───────┐    ┌──────────┴──────────┐
+            │   PostgreSQL   │    │      Redis          │
+            │ (Source of Truth)│    │   (Cache)          │
+            │                │    │                     │
+            │ ShoppingCarts  │    │ Key: "basket:alice" │
+            │ ShoppingCartItems│    │ Value: JSON        │
+            │                │    │ TTL: 24 saat       │
+            └────────────────┘    └─────────────────────┘
+                    │                       │
+                    │                       │
+            ┌───────┴───────────────────────┴───────┐
+            │  IConnectionMultiplexer (Singleton)   │
+            │  BasketDbContext (Scoped)              │
+            │  • Bağlantı havuzu                     │
+            │  • Thread-safe                         │
+            └────────────────────────────────────────┘
                     │
                     │
                     ▼
@@ -499,7 +543,8 @@ Bu dokümanda Basket Service'te gerçekleştirilen iki temel işlemin detaylı a
 | **ValidationBehavior.cs** | Cross-cutting | FluentValidation validator'ları otomatik çalıştırır |
 | **GetBasketHandler.cs** | İş Mantığı | Sepeti Redis'ten alır, gRPC ile indirim sorgular, DTO'ya map eder |
 | **StoreBasketHandler.cs** | İş Mantığı | DTO'yu Entity'ye map eder, Redis'e kaydeder, DTO'ya map eder |
-| **BasketRepository.cs** | Veri Erişim | Redis CRUD işlemlerini yapar (Get, Save, Delete) |
+| **BasketRepository.cs** | Veri Erişim | Redis + PostgreSQL CRUD işlemlerini yapar (Cache-aside pattern) |
+| **BasketDbContext.cs** | Veritabanı | EF Core ile PostgreSQL bağlantısı (ShoppingCarts, ShoppingCartItems) |
 | **DiscountGrpcService.cs** | gRPC Client | Discount servisine gRPC çağrısı yapar |
 | **StoreBasketValidator.cs** | Validation | StoreBasketCommand için validation kuralları tanımlar |
 | **ShoppingCartItemValidator.cs** | Validation | ShoppingCartItemDto için validation kuralları tanımlar |
@@ -510,7 +555,8 @@ Bu dokümanda Basket Service'te gerçekleştirilen iki temel işlemin detaylı a
 - **MediatR**: CQRS pattern, request/response pipeline
 - **FluentValidation**: Request validation (otomatik ValidationBehavior tarafından)
 - **AutoMapper**: Entity ↔ DTO mapping
-- **StackExchange.Redis**: Redis veritabanı erişimi
+- **StackExchange.Redis**: Redis veritabanı erişimi (cache)
+- **Entity Framework Core**: PostgreSQL veritabanı erişimi (source of truth)
 - **gRPC**: Discount servisi ile senkron iletişim
 - **System.Text.Json**: JSON serialization/deserialization
 
@@ -522,18 +568,18 @@ Bu dokümanda Basket Service'te gerçekleştirilen iki temel işlemin detaylı a
 |---------|-----------|-------------|
 | **HTTP Method** | GET | POST |
 | **Validation** | Yok (sadece string parametre) | Var (StoreBasketValidator) |
-| **Redis İşlemi** | GetBasket (okuma) | SaveBasket (yazma) |
+| **Veri İşlemi** | GetBasket (Redis cache → PostgreSQL) | SaveBasket (PostgreSQL → Redis cache) |
 | **gRPC Çağrısı** | Var (her item için indirim) | Yok |
 | **Mapping** | Entity → DTO | DTO → Entity → DTO |
 | **Pipeline Behaviors** | LoggingBehavior | LoggingBehavior + ValidationBehavior |
 
 ---
 
-## ⚠️ ÖNEMLİ: REDIS TEK VERİ KAYNAĞI
+## ⚠️ ÖNEMLİ: REDIS + POSTGRESQL (CACHE-ASIDE PATTERN)
 
 ### Soru: Redis'te veri yoksa veya kayıt yapılmazsa, veritabanına (DB) bakılıyor mu?
 
-**Cevap: HAYIR! Basket Service'te PostgreSQL veritabanı YOK.**
+**Cevap: EVET! Basket Service'te PostgreSQL veritabanı VAR ve Cache-aside Pattern kullanılıyor.**
 
 ### Mimari Karar
 
@@ -544,51 +590,96 @@ Bu dokümanda Basket Service'te gerçekleştirilen iki temel işlemin detaylı a
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │  BasketRepository.cs                                 │  │
 │  │  ──────────────────────────────────────────────────  │  │
-│  │  • GetBasket() → Redis'ten okur                      │  │
-│  │  • SaveBasket() → Redis'e yazar                       │  │
-│  │  • DeleteBasket() → Redis'ten siler                  │  │
+│  │  • GetBasket() → Önce Redis, yoksa PostgreSQL       │  │
+│  │  • SaveBasket() → PostgreSQL'e yaz, Redis'e cache'le │  │
+│  │  • DeleteBasket() → PostgreSQL'den sil, Redis'ten sil│  │
 │  │                                                       │  │
-│  │  ⚠️ PostgreSQL YOK!                                  │  │
-│  │  ⚠️ DbContext YOK!                                    │  │
-│  │  ⚠️ SQL sorgusu YOK!                                  │  │
+│  │  ✅ PostgreSQL = Source of Truth                      │  │
+│  │  ✅ Redis = Cache (hız için)                          │  │
+│  │  ✅ Cache-aside Pattern                               │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                        │                                    │
-│                        ▼                                    │
-│              ┌─────────────────────┐                        │
-│              │      REDIS          │                        │
-│              │   (Tek Veri Kaynağı)│                        │
-│              │                     │                        │
-│              │  Key: "basket:user1"│                        │
-│              │  Value: JSON       │                        │
-│              └─────────────────────┘                        │
+│            ┌───────────┴───────────┐                        │
+│            │                       │                        │
+│            ▼                       ▼                        │
+│  ┌─────────────────┐    ┌─────────────────────┐            │
+│  │   PostgreSQL    │    │      REDIS          │            │
+│  │ (Source of Truth)│    │   (Cache)           │            │
+│  │                 │    │                     │            │
+│  │ ShoppingCarts   │    │ Key: "basket:user1" │            │
+│  │ ShoppingCartItems│    │ Value: JSON         │            │
+│  └─────────────────┘    └─────────────────────┘            │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Neden PostgreSQL Yok?
+### Neden Redis + PostgreSQL? (Cache-aside Pattern)
 
 | Özellik | Açıklama |
 |---------|----------|
-| **Geçici Veri** | Sepet geçici veridir, kullanıcı çıkış yapınca silinebilir |
-| **Hız** | Redis çok hızlı (in-memory), SQL DB'den daha hızlı |
-| **Basitlik** | Key-Value yapısı sepet için ideal (`basket:user1` → JSON) |
-| **Checkout Sonrası** | Checkout yapılınca sepet silinir, Ordering Service'e event gönderilir |
-| **Kalıcılık Gerekmez** | Sepet kalıcı değil, sipariş kalıcı (Ordering Service'te) |
+| **Redis (Cache)** | Hızlı okuma/yazma için (kullanıcı deneyimi) |
+| **PostgreSQL (Source of Truth)** | Veri kalıcılığı için (veri kaybı riski düşük) |
+| **Redis down olsa bile** | PostgreSQL'den okur (yavaş ama çalışır) |
+| **Sepet geçmişi** | Tutulabilir (analiz için) |
+| **Gerçek dünyada** | Production sistemlerde genellikle bu yaklaşım kullanılır |
 
-### Akış Senaryoları
+### Cache-aside Pattern Akışı
 
-#### Senaryo 1: Redis'te Veri Yok
+#### GetBasket Akışı:
 ```
 1. GetBasket("alice") çağrılır
    ↓
-2. BasketRepository.GetBasket() → Redis'ten okur
+2. BasketRepository.GetBasket() → Önce Redis'e bak
+   ↓
+3a. Redis'te VAR → Direkt döner (hızlı) ✅
+   ↓
+3b. Redis'te YOK → PostgreSQL'den al
+   ↓
+4. PostgreSQL'den aldıktan sonra Redis'e cache'le (24 saat TTL)
+   ↓
+5. Return: ShoppingCart
+```
+
+#### SaveBasket Akışı:
+```
+1. SaveBasket(basket) çağrılır
+   ↓
+2. BasketRepository.SaveBasket() → PostgreSQL'e yaz (source of truth)
+   ↓
+3. PostgreSQL'e kaydedildi ✅
+   ↓
+4. Redis'e cache'le (24 saat TTL)
+   ↓
+5. Return: Saved ShoppingCart
+```
+
+#### DeleteBasket Akışı:
+```
+1. DeleteBasket("alice") çağrılır
+   ↓
+2. BasketRepository.DeleteBasket() → PostgreSQL'den sil
+   ↓
+3. PostgreSQL'den silindi ✅
+   ↓
+4. Redis'ten sil
+   ↓
+5. Return: true
+```
+
+### Akış Senaryoları
+
+#### Senaryo 1: Redis'te Veri Yok, PostgreSQL'de Var
+```
+1. GetBasket("alice") çağrılır
+   ↓
+2. BasketRepository.GetBasket() → Redis'e bak
    ↓
 3. Redis'te "basket:alice" key'i YOK
    ↓
-4. GetBasketHandler → null döner
+4. PostgreSQL'den al (ShoppingCarts tablosundan)
    ↓
-5. Handler → Boş sepet DTO döner (hata fırlatmaz)
+5. PostgreSQL'den aldıktan sonra Redis'e cache'le
    ↓
-6. ⚠️ PostgreSQL'e BAKILMAZ (çünkü DB yok)
+6. Return: ShoppingCart (PostgreSQL'den)
 ```
 
 #### Senaryo 2: Redis Down Olursa
@@ -597,28 +688,24 @@ Bu dokümanda Basket Service'te gerçekleştirilen iki temel işlemin detaylı a
    ↓
 2. BasketRepository.GetBasket() → Redis'e bağlanmaya çalışır
    ↓
-3. Redis bağlantı hatası (ConnectionException)
+3. RedisConnectionException yakalanır
    ↓
-4. Exception fırlatılır → GlobalExceptionHandler yakalar
+4. Sadece PostgreSQL'den okur (yavaş ama çalışır) ✅
    ↓
-5. HTTP 500 Internal Server Error döner
+5. Return: ShoppingCart (PostgreSQL'den)
    ↓
-6. ⚠️ PostgreSQL'e BAKILMAZ (çünkü DB yok)
+6. ⚠️ Redis'e cache'lenmez (Redis down)
 ```
 
-#### Senaryo 3: Veri Kaybolursa
+#### Senaryo 3: Her İkisi de Çalışıyor
 ```
-1. Redis restart olur (veri kaybolur - persistence yoksa)
+1. GetBasket("alice") çağrılır
    ↓
-2. GetBasket("alice") çağrılır
+2. BasketRepository.GetBasket() → Redis'e bak
    ↓
-3. Redis'te veri YOK → null döner
+3. Redis'te VAR → Direkt döner (hızlı) ✅
    ↓
-4. Handler → Boş sepet döner
-   ↓
-5. ⚠️ PostgreSQL'e BAKILMAZ (çünkü DB yok)
-   ↓
-6. Kullanıcı sepeti tekrar oluşturur
+4. PostgreSQL'e BAKILMAZ (cache hit)
 ```
 
 ### Diğer Servislerle Karşılaştırma
@@ -626,34 +713,17 @@ Bu dokümanda Basket Service'te gerçekleştirilen iki temel işlemin detaylı a
 | Servis | Veritabanı | Neden? |
 |--------|------------|--------|
 | **Catalog.API** | PostgreSQL | Ürünler kalıcı veri, ilişkisel yapı gerekli |
-| **Basket.API** | **Redis (Tek Kaynak)** | Sepet geçici veri, hız önemli |
+| **Basket.API** | **Redis + PostgreSQL** | Cache-aside pattern (hız + kalıcılık) |
 | **Ordering.API** | PostgreSQL | Siparişler kalıcı veri, ilişkisel yapı gerekli |
 | **Discount.Grpc** | PostgreSQL | Kuponlar kalıcı veri, ilişkisel yapı gerekli |
 
-### Redis Persistence (Opsiyonel)
-
-Redis'te veri kaybını önlemek için persistence kullanılabilir:
-
-```yaml
-# docker-compose.yml
-basketdb:
-  image: redis/redis-stack:latest
-  command: redis-server --appendonly yes  # AOF persistence
-  volumes:
-    - basketdb_data:/data  # Veri kalıcı olur
-```
-
-**Ancak:**
-- Sepet geçici veri olduğu için persistence genelde gerekmez
-- Checkout sonrası sepet silinir zaten
-- Kullanıcı sepeti tekrar oluşturabilir
-
 ### Özet
 
-✅ **Redis = Tek Veri Kaynağı** (PostgreSQL yok)  
-✅ **Redis'te veri yoksa → null döner, DB'ye bakılmaz**  
-✅ **Redis down olursa → Exception fırlatılır, DB'ye bakılmaz**  
-✅ **Bu bir mimari karar → Sepet geçici veri için ideal**
+✅ **PostgreSQL = Source of Truth** (gerçek veri kaynağı)  
+✅ **Redis = Cache** (hız için)  
+✅ **Cache-aside Pattern** → Önce Redis, yoksa PostgreSQL  
+✅ **Redis down olsa bile** → PostgreSQL'den okur (yavaş ama çalışır)  
+✅ **Gerçek dünyada** → Production sistemlerde genellikle bu yaklaşım kullanılır
 
 ---
 

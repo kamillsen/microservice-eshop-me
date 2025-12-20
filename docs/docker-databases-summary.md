@@ -11,12 +11,13 @@ Docker Compose dosyasından tespit edilen veritabanları:
 | **catalogdb** | CatalogDb | 5436 | 5432 | postgres | postgres |
 | **orderingdb** | OrderingDb | 5435 | 5432 | postgres | postgres |
 | **discountdb** | DiscountDb | 5434 | 5432 | postgres | postgres |
+| **basketpostgres** | BasketDb | 5437 | 5432 | postgres | postgres |
 
 ### Redis (Key-Value Store)
 
 | Container Adı | Host Port | Container Port | UI Port | Açıklama |
 |--------------|-----------|----------------|---------|----------|
-| **basketdb** | 6379 | 6379 | 8001 (RedisInsight) | Sepet verileri için cache |
+| **basketdb** | 6379 | 6379 | 8001 (RedisInsight) | Basket Service için cache (Cache-aside pattern) |
 
 ### RabbitMQ (Message Broker)
 
@@ -126,6 +127,29 @@ psql -h localhost -p 5434 -U postgres -d DiscountDb
 docker exec -it discountdb psql -U postgres -d DiscountDb
 ```
 
+### BasketDb (PostgreSQL)
+```
+Host: localhost (veya basketpostgres - container network içinde)
+Port: 5437 (localhost) veya 5432 (container network)
+Database: BasketDb
+Username: postgres
+Password: postgres
+```
+
+**Connection String Örnekleri:**
+- Localhost'tan: `Host=localhost;Port=5437;Database=BasketDb;Username=postgres;Password=postgres`
+- Container network içinden: `Host=basketpostgres;Port=5432;Database=BasketDb;Username=postgres;Password=postgres`
+
+**Localhost'tan bağlanma:**
+```bash
+psql -h localhost -p 5437 -U postgres -d BasketDb
+```
+
+**Container içinden bağlanma:**
+```bash
+docker exec -it basketpostgres psql -U postgres -d BasketDb
+```
+
 ### BasketDb (Redis)
 ```
 Host: localhost (veya basketdb - container network içinde)
@@ -204,6 +228,14 @@ Password: admin
    - Connection → Username: postgres
    - Connection → Password: postgres
 
+   **BasketDb:**
+   - General → Name: BasketDb
+   - Connection → Host: basketpostgres (veya localhost)
+   - Connection → Port: 5432
+   - Connection → Maintenance database: BasketDb
+   - Connection → Username: postgres
+   - Connection → Password: postgres
+
 ---
 
 ## 🚀 Container'ları Başlatma
@@ -213,7 +245,7 @@ Password: admin
 docker compose up -d
 
 # Sadece veritabanı container'larını başlat
-docker compose up -d catalogdb orderingdb discountdb basketdb messagebroker
+docker compose up -d catalogdb orderingdb discountdb basketpostgres basketdb messagebroker
 
 # Logları izle
 docker compose logs -f
@@ -249,7 +281,8 @@ Verilerin kalıcı olması için volume'lar tanımlanmış:
 - `catalogdb_data` → CatalogDb verileri
 - `orderingdb_data` → OrderingDb verileri
 - `discountdb_data` → DiscountDb verileri
-- `basketdb_data` → Redis verileri
+- `basketpostgres_data` → BasketDb verileri (PostgreSQL)
+- `basketdb_data` → Redis verileri (Basket Service cache)
 - `rabbitmq_data` → RabbitMQ verileri
 - `pgadmin_data` → pgAdmin ayarları
 

@@ -32,10 +32,13 @@
 - ✅ Discount hazır (gRPC client kullanılacak)
 - ✅ Artık sepet işlemleri yapılabilir
 
-**Neden Redis?**
-- Sepet geçici veri (kullanıcı çıkış yapınca silinebilir)
-- Çok hızlı okuma/yazma gerekiyor
-- Key-Value yapısı sepet için ideal (`basket:user1` → JSON)
+**Neden Redis + PostgreSQL? (Cache-aside Pattern)**
+- **Redis (Cache):** Hızlı okuma/yazma için (kullanıcı deneyimi)
+- **PostgreSQL (Source of Truth):** Veri kalıcılığı için (veri kaybı riski düşük)
+- **Cache-aside Pattern:** Önce Redis'e bak, yoksa PostgreSQL'den al ve cache'le
+- Redis down olsa bile PostgreSQL'den okur (yavaş ama çalışır)
+- Sepet geçmişi tutulabilir (analiz için)
+- Gerçek dünyada production sistemlerde genellikle bu yaklaşım kullanılır
 
 **Neden gRPC Client?**
 - Discount Service'e sürekli indirim sorgusu yapılacak
@@ -51,7 +54,7 @@
 
 ## 5.1 Basket.API Projesi Oluştur
 
-**Hedef:** Redis kullanan REST API projesi
+**Hedef:** Redis + PostgreSQL kullanan REST API projesi (Cache-aside pattern)
 
 ### Görevler:
 
@@ -90,7 +93,7 @@ dotnet sln add src/Services/Basket/Basket.API/Basket.API.csproj
 ```
 
 #### NuGet paketlerini ekle
-**Ne işe yarar:** Redis, gRPC Client, MediatR, MassTransit ve diğer gerekli paketleri ekler.
+**Ne işe yarar:** Redis, PostgreSQL, gRPC Client, MediatR, MassTransit ve diğer gerekli paketleri ekler.
 
 ```bash
 cd src/Services/Basket/Basket.API
@@ -100,12 +103,16 @@ dotnet add package FluentValidation.DependencyInjectionExtensions
 dotnet add package AutoMapper
 dotnet add package AutoMapper.Extensions.Microsoft.DependencyInjection
 dotnet add package StackExchange.Redis
+dotnet add package Microsoft.EntityFrameworkCore
+dotnet add package Microsoft.EntityFrameworkCore.Design
+dotnet add package Npgsql.EntityFrameworkCore.PostgreSQL
 dotnet add package Grpc.Net.Client
 dotnet add package Google.Protobuf
 dotnet add package Grpc.Tools
 dotnet add package MassTransit
 dotnet add package MassTransit.RabbitMQ
 dotnet add package AspNetCore.HealthChecks.Redis
+dotnet add package AspNetCore.HealthChecks.NpgSql
 ```
 
 **Paketler:**
@@ -113,12 +120,16 @@ dotnet add package AspNetCore.HealthChecks.Redis
 - `FluentValidation` → Request validation için
 - `AutoMapper` → Object mapping için
 - `StackExchange.Redis` → Redis client
+- `Microsoft.EntityFrameworkCore` → EF Core (PostgreSQL için)
+- `Microsoft.EntityFrameworkCore.Design` → EF Core migrations için
+- `Npgsql.EntityFrameworkCore.PostgreSQL` → PostgreSQL provider
 - `Grpc.Net.Client` → gRPC client (Discount Service'e bağlanmak için)
 - `Google.Protobuf` → Protocol Buffers
 - `Grpc.Tools` → Proto dosyasından C# kodları generate etmek için
 - `MassTransit` → RabbitMQ abstraction
 - `MassTransit.RabbitMQ` → RabbitMQ provider
 - `AspNetCore.HealthChecks.Redis` → Redis health check
+- `AspNetCore.HealthChecks.NpgSql` → PostgreSQL health check
 
 **Not:** `Grpc.Tools` paketi `PrivateAssets="All"` olarak eklenmelidir (sadece build time'da kullanılır).
 
@@ -186,7 +197,7 @@ mkdir -p Mapping
    - **Neden?**: Object mapping için
 
 #### ShoppingCart ve ShoppingCartItem Entity'lerini oluştur
-**Ne işe yarar:** Sepet verilerini temsil eden entity class'larını oluşturur.
+**Ne işe yarar:** Sepet verilerini temsil eden entity class'larını oluşturur (PostgreSQL için).
 
 **Entities/ShoppingCart.cs:**
 
@@ -195,6 +206,7 @@ namespace Basket.API.Entities;
 
 public class ShoppingCart
 {
+    public Guid Id { get; set; }
     public string UserName { get; set; } = default!;
     public List<ShoppingCartItem> Items { get; set; } = new();
     
@@ -215,6 +227,9 @@ namespace Basket.API.Entities;
 
 public class ShoppingCartItem
 {
+    public Guid Id { get; set; }
+    public Guid ShoppingCartId { get; set; }
+    public ShoppingCart ShoppingCart { get; set; } = default!;
     public Guid ProductId { get; set; }
     public string ProductName { get; set; } = default!;
     public int Quantity { get; set; }
@@ -223,21 +238,22 @@ public class ShoppingCartItem
 ```
 
 **Açıklama:**
-- `ShoppingCart` → Sepet (UserName key, Items listesi, TotalPrice hesaplanan property)
-- `ShoppingCartItem` → Sepet item'ı (ProductId, ProductName, Quantity, Price)
+- `ShoppingCart` → Sepet (Id, UserName, Items navigation property, TotalPrice calculated property)
+- `ShoppingCartItem` → Sepet item'ı (Id, ShoppingCartId FK, ShoppingCart navigation, ProductId, ProductName, Quantity, Price)
 - `TotalPrice` → Calculated property (Items'ların toplamı)
 
 **Neden calculated property?**
-- Redis'te sadece Items tutulur
+- PostgreSQL'de sadece Items tutulur
 - TotalPrice runtime'da hesaplanır (indirim dahil)
 
 #### appsettings.json'a connection string ve ayarları ekle
-**Ne işe yarar:** Redis, gRPC ve RabbitMQ bağlantı bilgilerini ekler.
+**Ne işe yarar:** Redis, PostgreSQL, gRPC ve RabbitMQ bağlantı bilgilerini ekler.
 
 ```json
 {
   "ConnectionStrings": {
-    "Redis": "localhost:6379"
+    "Redis": "localhost:6379",
+    "Database": "Host=localhost;Port=5437;Database=BasketDb;Username=postgres;Password=postgres"
   },
   "GrpcSettings": {
     "DiscountUrl": "http://localhost:5152"
@@ -257,12 +273,13 @@ public class ShoppingCartItem
 
 **Açıklama:**
 - `ConnectionStrings:Redis` → Redis bağlantı string'i (localhost:6379)
+- `ConnectionStrings:Database` → PostgreSQL bağlantı string'i (localhost:5437 - host port)
 - `GrpcSettings:DiscountUrl` → Discount gRPC servis URL'i (localhost:5152 - Discount.Grpc port)
 - `MessageBroker:Host` → RabbitMQ bağlantı string'i (localhost:5673 - host port)
 
 **Not:** 
-- Localhost'tan bağlanırken: `localhost:6379`, `localhost:5152`, `localhost:5673`
-- Container network içinde: `basketdb:6379`, `http://discount.grpc:8080`, `amqp://guest:guest@messagebroker:5672`
+- Localhost'tan bağlanırken: `localhost:6379`, `localhost:5437`, `localhost:5152`, `localhost:5673`
+- Container network içinde: `basketdb:6379`, `basketpostgres:5432`, `http://discount.grpc:8080`, `amqp://guest:guest@messagebroker:5672`
 
 ### Kontrol:
 - Proje build oluyor mu? (`dotnet build`)
@@ -271,9 +288,9 @@ public class ShoppingCartItem
 
 ---
 
-## 5.2 Basket Redis Repository
+## 5.2 Basket Redis + PostgreSQL Repository
 
-**Hedef:** Redis ile sepet işlemleri (Get, Save, Delete)
+**Hedef:** Redis + PostgreSQL ile sepet işlemleri (Cache-aside pattern)
 
 ### Görevler:
 
@@ -300,85 +317,219 @@ public interface IBasketRepository
 - `SaveBasket` → Redis'e sepeti kaydeder (yoksa oluşturur, varsa günceller)
 - `DeleteBasket` → Redis'ten sepeti siler
 
-#### BasketRepository implementation oluştur
-**Ne işe yarar:** Redis ile sepet işlemlerini implement eder (JSON serialize/deserialize).
+#### BasketDbContext oluştur
+**Ne işe yarar:** EF Core ile PostgreSQL veritabanı bağlantısını sağlar.
+
+**Data/BasketDbContext.cs:**
+
+```csharp
+using Basket.API.Entities;
+using Microsoft.EntityFrameworkCore;
+
+namespace Basket.API.Data;
+
+public class BasketDbContext : DbContext
+{
+    public BasketDbContext(DbContextOptions<BasketDbContext> options) : base(options)
+    {
+    }
+
+    public DbSet<ShoppingCart> ShoppingCarts { get; set; }
+    public DbSet<ShoppingCartItem> ShoppingCartItems { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ShoppingCart>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserName).IsUnique();
+            entity.HasMany(e => e.Items)
+                .WithOne(e => e.ShoppingCart)
+                .HasForeignKey(e => e.ShoppingCartId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ShoppingCartItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+        });
+
+        base.OnModelCreating(modelBuilder);
+    }
+}
+```
+
+#### BasketRepository implementation oluştur (Cache-aside Pattern)
+**Ne işe yarar:** Redis + PostgreSQL ile sepet işlemlerini implement eder (Cache-aside pattern).
 
 **Data/BasketRepository.cs:**
 
 ```csharp
 using System.Text.Json;
 using Basket.API.Entities;
+using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
 
 namespace Basket.API.Data;
 
 public class BasketRepository : IBasketRepository
 {
-    private readonly IDatabase _database;
+    private readonly IDatabase _redis;
+    private readonly BasketDbContext _context;
     private readonly ILogger<BasketRepository> _logger;
 
-    public BasketRepository(IConnectionMultiplexer redis, ILogger<BasketRepository> logger)
+    public BasketRepository(
+        IConnectionMultiplexer redis,
+        BasketDbContext context,
+        ILogger<BasketRepository> logger)
     {
-        _database = redis.GetDatabase();
+        _redis = redis.GetDatabase();
+        _context = context;
         _logger = logger;
     }
 
     public async Task<ShoppingCart?> GetBasket(string userName)
     {
-        var basket = await _database.StringGetAsync($"basket:{userName}");
-        
-        if (basket.IsNullOrEmpty)
-            return null;
+        try
+        {
+            // 1. Önce Redis'e bak (hızlı)
+            var cached = await _redis.StringGetAsync($"basket:{userName}");
+            if (!cached.IsNullOrEmpty)
+            {
+                _logger.LogInformation("Basket retrieved from cache for {UserName}", userName);
+                return JsonSerializer.Deserialize<ShoppingCart>(cached!);
+            }
 
-        return JsonSerializer.Deserialize<ShoppingCart>(basket!);
+            // 2. Redis'te yoksa PostgreSQL'den al
+            var basket = await _context.ShoppingCarts
+                .Include(x => x.Items)
+                .FirstOrDefaultAsync(x => x.UserName == userName);
+
+            // 3. PostgreSQL'den aldıktan sonra Redis'e yaz (cache)
+            if (basket != null)
+            {
+                var json = JsonSerializer.Serialize(basket);
+                await _redis.StringSetAsync($"basket:{userName}", json, TimeSpan.FromHours(24));
+                _logger.LogInformation("Basket retrieved from database and cached for {UserName}", userName);
+            }
+
+            return basket;
+        }
+        catch (RedisConnectionException ex)
+        {
+            // Redis down olursa sadece PostgreSQL'den oku
+            _logger.LogWarning(ex, "Redis unavailable, reading from database for {UserName}", userName);
+            return await _context.ShoppingCarts
+                .Include(x => x.Items)
+                .FirstOrDefaultAsync(x => x.UserName == userName);
+        }
     }
 
     public async Task<ShoppingCart> SaveBasket(ShoppingCart basket)
     {
-        var serializedBasket = JsonSerializer.Serialize(basket);
-        await _database.StringSetAsync($"basket:{basket.UserName}", serializedBasket);
-        
-        _logger.LogInformation("Basket saved for {UserName}", basket.UserName);
-        
-        return await GetBasket(basket.UserName) ?? basket;
+        // 1. PostgreSQL'e yaz (source of truth)
+        var existing = await _context.ShoppingCarts
+            .Include(x => x.Items)
+            .FirstOrDefaultAsync(x => x.UserName == basket.UserName);
+
+        if (existing == null)
+        {
+            basket.Id = Guid.NewGuid();
+            basket.Items.ForEach(item => item.Id = Guid.NewGuid());
+            _context.ShoppingCarts.Add(basket);
+        }
+        else
+        {
+            _context.ShoppingCartItems.RemoveRange(existing.Items);
+            basket.Items.ForEach(item =>
+            {
+                item.Id = Guid.NewGuid();
+                item.ShoppingCartId = existing.Id;
+            });
+            existing.Items = basket.Items;
+            _context.ShoppingCarts.Update(existing);
+        }
+
+        await _context.SaveChangesAsync();
+
+        // 2. Redis'e yaz (cache)
+        try
+        {
+            var savedBasket = existing ?? basket;
+            var json = JsonSerializer.Serialize(savedBasket);
+            await _redis.StringSetAsync($"basket:{basket.UserName}", json, TimeSpan.FromHours(24));
+            _logger.LogInformation("Basket saved to database and cached for {UserName}", basket.UserName);
+        }
+        catch (RedisConnectionException ex)
+        {
+            _logger.LogWarning(ex, "Redis unavailable, basket saved to database only for {UserName}", basket.UserName);
+        }
+
+        return existing ?? basket;
     }
 
     public async Task<bool> DeleteBasket(string userName)
     {
-        var deleted = await _database.KeyDeleteAsync($"basket:{userName}");
-        
-        if (deleted)
-            _logger.LogInformation("Basket deleted for {UserName}", userName);
-        
-        return deleted;
+        // 1. PostgreSQL'den sil
+        var basket = await _context.ShoppingCarts
+            .FirstOrDefaultAsync(x => x.UserName == userName);
+
+        if (basket != null)
+        {
+            _context.ShoppingCarts.Remove(basket);
+            await _context.SaveChangesAsync();
+        }
+
+        // 2. Redis'ten sil
+        try
+        {
+            var deleted = await _redis.KeyDeleteAsync($"basket:{userName}");
+            if (deleted || basket != null)
+            {
+                _logger.LogInformation("Basket deleted for {UserName}", userName);
+                return true;
+            }
+        }
+        catch (RedisConnectionException ex)
+        {
+            _logger.LogWarning(ex, "Redis unavailable, basket deleted from database only for {UserName}", userName);
+        }
+
+        return basket != null;
     }
 }
 ```
 
 **Açıklama:**
-- `IConnectionMultiplexer` → Redis connection (DI'dan gelir)
-- `IDatabase` → Redis database instance
-- `StringGetAsync` → Redis'ten string değer alır (JSON)
-- `StringSetAsync` → Redis'e string değer kaydeder (JSON)
-- `KeyDeleteAsync` → Redis'ten key siler
-- `JsonSerializer` → System.Text.Json ile serialize/deserialize
-- Key format: `basket:{userName}` (örn: `basket:user1`)
+- **Cache-aside Pattern:**
+  - `GetBasket`: Önce Redis'e bak, yoksa PostgreSQL'den al ve cache'le
+  - `SaveBasket`: PostgreSQL'e yaz (source of truth), Redis'e cache'le
+  - `DeleteBasket`: PostgreSQL'den sil, Redis'ten sil
+- **Redis down olursa:** Sadece PostgreSQL kullanılır (yavaş ama çalışır)
+- **PostgreSQL = Source of Truth:** Gerçek veri kaynağı
+- **Redis = Cache:** Hız için
 
 **Önemli Noktalar:**
 - JSON serialize/deserialize → Redis string olarak tutar
 - Key naming: `basket:{userName}` → Her kullanıcı için ayrı key
 - Null check → GetBasket null dönebilir (sepet yoksa)
+- EF Core Include → Navigation property'leri yükler
 
-#### Program.cs'de Redis ve Repository kaydı
-**Ne işe yarar:** Redis connection ve repository'yi DI container'a kaydeder.
+#### Program.cs'de PostgreSQL, Redis ve Repository kaydı
+**Ne işe yarar:** PostgreSQL DbContext, Redis connection ve repository'yi DI container'a kaydeder.
 
 **Program.cs güncellemesi:**
 
 ```csharp
 using Basket.API.Data;
+using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// PostgreSQL
+builder.Services.AddDbContext<BasketDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Database")));
 
 // Redis
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
@@ -391,26 +542,44 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 builder.Services.AddScoped<IBasketRepository, BasketRepository>();
 
 // ... diğer servisler
+
+var app = builder.Build();
+
+// Migration
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<BasketDbContext>();
+    await context.Database.MigrateAsync();
+}
+
+// Health Checks
+builder.Services.AddHealthChecks()
+    .AddRedis(builder.Configuration.GetConnectionString("Redis")!)
+    .AddNpgSql(builder.Configuration.GetConnectionString("Database")!);
 ```
 
 **Açıklama:**
+- `AddDbContext<BasketDbContext>` → PostgreSQL DbContext scoped (her request için yeni)
 - `AddSingleton<IConnectionMultiplexer>` → Redis connection singleton (tek instance, tüm request'ler paylaşır)
 - `ConnectionMultiplexer.Connect` → Redis'e bağlanır
 - `AddScoped<IBasketRepository>` → Repository scoped (her request için yeni instance)
+- `MigrateAsync()` → Migration'ları otomatik uygular (container başladığında)
+- `AddHealthChecks().AddRedis().AddNpgSql()` → Redis ve PostgreSQL health check
 
-**Neden Singleton?**
+**Neden Singleton (Redis)?**
 - Redis connection pahalı (network connection)
 - Tüm request'ler aynı connection'ı kullanabilir
 - Thread-safe
 
-**Neden Scoped?**
-- Repository her request için yeni instance
+**Neden Scoped (DbContext, Repository)?**
+- DbContext ve Repository her request için yeni instance
 - Request bitince dispose edilir
 
 ### Test:
+- PostgreSQL'e bağlanıyor mu? (Migration uygulandı mı? Tablolar oluştu mu?)
 - Redis'e bağlanıyor mu? (`dotnet run` ile servisi başlat, logları kontrol et)
-- Sepet kaydediliyor mu? (`docker exec -it basketdb redis-cli GET "basket:user1"`)
-- Sepet getiriliyor mu? (Repository metodlarını test et)
+- Sepet kaydediliyor mu? (PostgreSQL ve Redis'te kontrol et)
+- Cache-aside pattern çalışıyor mu? (Redis'te yoksa PostgreSQL'den alıyor mu?)
 
 ---
 
@@ -1116,14 +1285,15 @@ app.UseExceptionHandler();
 - Tüm hataları yakalar ve ProblemDetails formatında döner
 
 #### Health Checks ekle
-**Ne işe yarar:** Redis bağlantısını kontrol eder.
+**Ne işe yarar:** Redis ve PostgreSQL bağlantılarını kontrol eder.
 
 **Program.cs güncellemesi:**
 
 ```csharp
 // Health Checks
 builder.Services.AddHealthChecks()
-    .AddRedis(builder.Configuration.GetConnectionString("Redis")!);
+    .AddRedis(builder.Configuration.GetConnectionString("Redis")!)
+    .AddNpgSql(builder.Configuration.GetConnectionString("Database")!);
 
 // ...
 
@@ -1132,7 +1302,8 @@ app.MapHealthChecks("/health");
 
 **Açıklama:**
 - `AddRedis` → Redis health check ekler
-- `/health` endpoint'i → Redis bağlantısını kontrol eder
+- `AddNpgSql` → PostgreSQL health check ekler
+- `/health` endpoint'i → Redis ve PostgreSQL bağlantılarını kontrol eder
 
 #### Swagger konfigürasyonu
 **Ne işe yarar:** Swagger UI'ı yapılandırır.

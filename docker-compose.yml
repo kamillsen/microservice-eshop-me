@@ -66,6 +66,23 @@ services:
       timeout: 5s
       retries: 5
 
+  basketpostgres:
+    image: postgres:16-alpine
+    container_name: basketpostgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: BasketDb
+    ports:
+      - "5437:5432"  # Host port 5437 (diğer PostgreSQL'lerle çakışmaması için)
+    volumes:
+      - basketpostgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   messagebroker:
     image: rabbitmq:3-management-alpine
     container_name: messagebroker
@@ -99,12 +116,14 @@ services:
       - catalogdb
       - orderingdb
       - discountdb
+      - basketpostgres
 
 volumes:
   catalogdb_data:
   orderingdb_data:
   discountdb_data:
   basketdb_data:
+  basketpostgres_data:
   rabbitmq_data:
   pgadmin_data:
 

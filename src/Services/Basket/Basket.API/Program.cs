@@ -7,6 +7,7 @@ using FluentValidation;
 using Grpc.Net.Client;
 using MassTransit;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -39,6 +40,10 @@ builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
 
 // AutoMapper
 builder.Services.AddAutoMapper(typeof(Program).Assembly);
+
+// PostgreSQL
+builder.Services.AddDbContext<BasketDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Database")));
 
 // Redis
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
@@ -80,9 +85,17 @@ builder.Services.AddProblemDetails();
 
 // Health Checks
 builder.Services.AddHealthChecks()
-    .AddRedis(builder.Configuration.GetConnectionString("Redis")!);
+    .AddRedis(builder.Configuration.GetConnectionString("Redis")!)
+    .AddNpgSql(builder.Configuration.GetConnectionString("Database")!);
 
 var app = builder.Build();
+
+// Migration
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<BasketDbContext>();
+    await context.Database.MigrateAsync();
+}
 
 // Exception Handler Middleware
 app.UseExceptionHandler();

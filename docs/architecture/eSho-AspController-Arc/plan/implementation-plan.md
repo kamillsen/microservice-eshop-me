@@ -128,12 +128,16 @@
 - `AutoMapper` (latest)
 - `AutoMapper.Extensions.Microsoft.DependencyInjection` (latest)
 - `StackExchange.Redis` (latest)
+- `Microsoft.EntityFrameworkCore` (9.0)
+- `Microsoft.EntityFrameworkCore.Design` (9.0)
+- `Npgsql.EntityFrameworkCore.PostgreSQL` (latest)
 - `Grpc.Net.Client` (latest)
 - `Google.Protobuf` (latest)
 - `Grpc.Tools` (latest, PrivateAssets="All")
 - `MassTransit` (latest)
 - `MassTransit.RabbitMQ` (latest)
 - `AspNetCore.HealthChecks.Redis` (latest)
+- `AspNetCore.HealthChecks.NpgSql` (latest)
 - `BuildingBlocks.Exceptions` (project reference)
 - `BuildingBlocks.Behaviors` (project reference)
 - `BuildingBlocks.Messaging` (project reference)
@@ -198,7 +202,8 @@ amqp://{username}:{password}@{hostname}:{port}
 ```json
 {
   "ConnectionStrings": {
-    "Redis": "..."
+    "Redis": "...",
+    "Database": "Host=localhost;Port=5437;Database=BasketDb;Username=postgres;Password=postgres"
   },
   "GrpcSettings": {
     "DiscountUrl": "http://discount.grpc:8080"
@@ -596,7 +601,7 @@ amqp://{username}:{password}@{hostname}:{port}
 - ✅ Artık sepet işlemleri yapılabilir
 
 ### 5.1 Basket.API Projesi Oluştur
-**Hedef:** Redis kullanan REST API
+**Hedef:** Redis + PostgreSQL kullanan REST API (Cache-aside pattern)
 
 **Görevler:**
 - Web API projesi oluştur (`dotnet new webapi -n Basket.API`)
@@ -604,27 +609,44 @@ amqp://{username}:{password}@{hostname}:{port}
 - **Paketler:** [Referans Bilgileri - Basket.API](#nuget-paket-listesi) bölümündeki tüm paketleri ekle
 - **Project References:** BuildingBlocks.Exceptions, BuildingBlocks.Behaviors, BuildingBlocks.Messaging
 - `appsettings.json`'a Redis connection string ekle (format: [Connection String Formatları](#connection-string-formatları))
+- `appsettings.json`'a PostgreSQL connection string ekle (`Database`)
 - `appsettings.json`'a `GrpcSettings.DiscountUrl` ekle
 - `appsettings.json`'a `MessageBroker.Host` ekle (RabbitMQ)
 - `ShoppingCart`, `ShoppingCartItem` entity'lerini oluştur ([Entity Modelleri](#entity-modelleri) bölümüne bak)
-- `BasketRepository` interface ve implementation (Redis, JSON serialize/deserialize)
+  - `ShoppingCart`: `Id` (Guid), `UserName`, `Items` (navigation property)
+  - `ShoppingCartItem`: `Id` (Guid), `ShoppingCartId` (FK), `ShoppingCart` (navigation), `ProductId`, `ProductName`, `Quantity`, `Price`
+- `BasketDbContext` oluştur (EF Core, PostgreSQL)
+- `BasketRepository` interface ve implementation (Redis + PostgreSQL, Cache-aside pattern)
 
 **Test:** Proje build oluyor mu? (`dotnet build`)
 
 ---
 
-### 5.2 Basket Redis Repository
-**Hedef:** Redis ile sepet işlemleri
+### 5.2 Basket Redis + PostgreSQL Repository
+**Hedef:** Redis + PostgreSQL ile sepet işlemleri (Cache-aside pattern)
 
 **Görevler:**
-- `GetBasket` implement et (Redis'ten JSON deserialize)
-- `SaveBasket` implement et (Redis'e JSON serialize)
-- `DeleteBasket` implement et
-- Redis connection test et
+- `BasketDbContext` oluştur (EF Core, PostgreSQL)
+- EF Core Migration oluştur (`dotnet ef migrations add InitialCreate`)
+- `GetBasket` implement et:
+  - Önce Redis'e bak (cache)
+  - Redis'te yoksa PostgreSQL'den al
+  - PostgreSQL'den aldıktan sonra Redis'e yaz (cache)
+  - Redis down olursa sadece PostgreSQL'den oku
+- `SaveBasket` implement et:
+  - PostgreSQL'e yaz (source of truth)
+  - Redis'e yaz (cache)
+  - Redis down olursa sadece PostgreSQL'e yaz
+- `DeleteBasket` implement et:
+  - PostgreSQL'den sil
+  - Redis'ten sil
+- Redis ve PostgreSQL connection test et
 
 **Test:**
 - Redis'e bağlanıyor mu?
-- Sepet kaydediliyor mu? (`docker exec -it basketdb redis-cli GET "basket:user1"`)
+- PostgreSQL'e bağlanıyor mu?
+- Sepet kaydediliyor mu? (Redis ve PostgreSQL'de kontrol et)
+- Cache-aside pattern çalışıyor mu? (Redis'te yoksa PostgreSQL'den alıyor mu?)
 
 ---
 

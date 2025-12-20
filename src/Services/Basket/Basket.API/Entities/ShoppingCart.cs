@@ -2,6 +2,7 @@ namespace Basket.API.Entities;
 
 public class ShoppingCart
 {
+    public Guid Id { get; set; }
     public string UserName { get; set; } = default!;
     public List<ShoppingCartItem> Items { get; set; } = new();
     

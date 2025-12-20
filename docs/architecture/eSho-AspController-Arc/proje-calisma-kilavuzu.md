@@ -90,7 +90,8 @@ docker compose up -d
 - `catalogdb` → PostgreSQL (port 5436)
 - `orderingdb` → PostgreSQL (port 5435)
 - `discountdb` → PostgreSQL (port 5434)
-- `basketdb` → Redis (port 6379, RedisInsight UI: 8001)
+- `basketpostgres` → PostgreSQL (port 5437) - Basket Service için
+- `basketdb` → Redis (port 6379, RedisInsight UI: 8001) - Basket Service cache için
 - `messagebroker` → RabbitMQ (AMQP: 5673, Management UI: 15673)
 - `pgadmin` → pgAdmin Web UI (port 5050)
 
@@ -125,10 +126,11 @@ docker ps --filter "name=catalogdb"
 
 **Başarılı Başlatma Çıktısı:**
 ```
-[+] Running 6/6
+[+] Running 7/7]
  ✔ Container discountdb      Started
  ✔ Container orderingdb      Started
  ✔ Container catalogdb       Started
+ ✔ Container basketpostgres  Started
  ✔ Container basketdb        Started
  ✔ Container messagebroker   Started
  ✔ Container pgadmin         Started
@@ -208,23 +210,33 @@ docker compose up -d discountdb
 
 ---
 
-#### 2.4. Basket Veritabanı (Redis)
+#### 2.4. Basket Veritabanları (PostgreSQL + Redis)
 
 **Ne İşe Yarar:**
-- Basket Service'in cache veritabanı (henüz oluşturulmadı)
-- Sepet bilgilerini geçici olarak saklar
+- **PostgreSQL (basketpostgres):** Basket Service'in source of truth veritabanı
+- **Redis (basketdb):** Basket Service'in cache veritabanı (Cache-aside pattern)
 
-**Komut:**
+**Komutlar:**
 ```bash
+# PostgreSQL
+docker compose up -d basketpostgres
+
+# Redis
 docker compose up -d basketdb
 ```
 
 **Portlar:**
+- PostgreSQL: `5437` (host) → `5432` (container)
 - Redis: `6379`
 - RedisInsight UI: `8001` (http://localhost:8001)
 
 **Kontrol:**
 ```bash
+# PostgreSQL hazır mı?
+docker exec basketpostgres pg_isready -U postgres
+# Beklenen: /var/run/postgresql:5432 - accepting connections
+
+# Redis çalışıyor mu?
 docker exec basketdb redis-cli ping
 # Beklenen: PONG
 ```
@@ -264,7 +276,7 @@ docker compose up -d messagebroker
 docker compose up -d pgadmin
 ```
 
-**Not:** pgAdmin başlatıldığında bağımlı olduğu veritabanı container'ları (`catalogdb`, `orderingdb`, `discountdb`) da otomatik başlatılır (`depends_on`).
+**Not:** pgAdmin başlatıldığında bağımlı olduğu veritabanı container'ları (`catalogdb`, `orderingdb`, `discountdb`, `basketpostgres`) da otomatik başlatılır (`depends_on`).
 
 **Port:** `5050` (http://localhost:5050)
 
@@ -275,19 +287,33 @@ docker compose up -d pgadmin
 **Veritabanı Bağlantısı Ekleme:**
 1. Tarayıcıda `http://localhost:5050` aç
 2. Giriş yap (`admin@admin.com` / `admin`)
-3. "Add New Server" tıkla
-4. **General tab:**
-   - Name: `CatalogDb`
-5. **Connection tab:**
-   - Host: `catalogdb` (Docker container adı)
-   - Port: `5432` (container içindeki port, host port değil!)
-   - Database: `CatalogDb`
-   - Username: `postgres`
-   - Password: `postgres`
-   - "Save password" işaretle
-6. "Save" tıkla
+3. Her veritabanı için ayrı server kaydı oluştur:
 
-**Önemli:** Host olarak `catalogdb` kullanın (localhost değil). pgAdmin Docker container içinde çalıştığı için container network'ünde `catalogdb` adını çözümler.
+   **CatalogDb:**
+   - "Add New Server" tıkla
+   - **General tab:** Name: `CatalogDb`
+   - **Connection tab:**
+     - Host: `catalogdb` (Docker container adı)
+     - Port: `5432` (container içindeki port, host port değil!)
+     - Database: `CatalogDb`
+     - Username: `postgres`
+     - Password: `postgres`
+     - "Save password" işaretle
+   - "Save" tıkla
+
+   **BasketDb:**
+   - "Add New Server" tıkla
+   - **General tab:** Name: `BasketDb`
+   - **Connection tab:**
+     - Host: `basketpostgres` (Docker container adı)
+     - Port: `5432` (container içindeki port, host port değil!)
+     - Database: `BasketDb`
+     - Username: `postgres`
+     - Password: `postgres`
+     - "Save password" işaretle
+   - "Save" tıkla
+
+**Önemli:** Host olarak container adlarını kullanın (localhost değil). pgAdmin Docker container içinde çalıştığı için container network'ünde container adlarını çözümler.
 
 ---
 
@@ -317,6 +343,7 @@ NAME            STATUS                    PORTS
 catalogdb       Up 5 minutes (healthy)   0.0.0.0:5436->5432/tcp
 orderingdb      Up 5 minutes (healthy)   0.0.0.0:5435->5432/tcp
 discountdb      Up 5 minutes (healthy)   0.0.0.0:5434->5432/tcp
+basketpostgres  Up 5 minutes (healthy)   0.0.0.0:5437->5432/tcp
 basketdb        Up 5 minutes (healthy)   0.0.0.0:6379->6379/tcp, 0.0.0.0:8001->8001/tcp
 messagebroker   Up 5 minutes (healthy)   4369/tcp, 5672/tcp, 15672/tcp, 0.0.0.0:5673->5672/tcp, 0.0.0.0:15673->15672/tcp
 pgadmin         Up 5 minutes             0.0.0.0:5050->80/tcp
@@ -472,7 +499,10 @@ docker ps --format "table {{.Names}}\t{{.Ports}}"
 docker ps --filter "publish=5436"
 
 # Port erişilebilirliğini test et
-nc -zv localhost 5436  # PostgreSQL
+nc -zv localhost 5436  # Catalog PostgreSQL
+nc -zv localhost 5435  # Ordering PostgreSQL
+nc -zv localhost 5434  # Discount PostgreSQL
+nc -zv localhost 5437  # Basket PostgreSQL
 nc -zv localhost 6379  # Redis
 nc -zv localhost 5673  # RabbitMQ AMQP
 nc -zv localhost 15673 # RabbitMQ Management
@@ -488,7 +518,7 @@ echo "=== Container Durumları ==="
 docker compose ps
 
 echo -e "\n=== Health Check Durumları ==="
-docker ps --format "table {{.Names}}\t{{.Status}}" --filter "name=catalogdb|orderingdb|discountdb|basketdb|messagebroker|pgadmin"
+docker ps --format "table {{.Names}}\t{{.Status}}" --filter "name=catalogdb|orderingdb|discountdb|basketpostgres|basketdb|messagebroker|pgadmin"
 
 echo -e "\n=== Port Durumları ==="
 docker ps --format "table {{.Names}}\t{{.Ports}}" --filter "name=catalogdb|orderingdb|discountdb|basketdb|messagebroker|pgadmin"
@@ -530,6 +560,7 @@ check_container() {
 check_container "catalogdb" "pg_isready"
 check_container "orderingdb" "pg_isready"
 check_container "discountdb" "pg_isready"
+check_container "basketpostgres" "pg_isready"
 check_container "basketdb" "redis-cli ping"
 check_container "messagebroker" "rabbitmq-diagnostics ping"
 check_container "pgadmin"
@@ -556,7 +587,7 @@ docker ps --filter "health=unhealthy"
 docker compose logs --tail=50 | grep -i error
 
 # 4. Port çakışması var mı?
-netstat -tuln | grep -E "(5436|5435|5434|6379|5673|15673|5050|8001)"
+netstat -tuln | grep -E "(5436|5435|5434|5437|6379|5673|15673|5050|8001)"
 
 # 5. Disk alanı yeterli mi?
 df -h
@@ -817,6 +848,9 @@ docker compose stop orderingdb
 # Discount veritabanını durdur
 docker compose stop discountdb
 
+# Basket PostgreSQL durdur
+docker compose stop basketpostgres
+
 # Basket (Redis) durdur
 docker compose stop basketdb
 
@@ -837,6 +871,9 @@ docker stop orderingdb
 
 # Discount veritabanını durdur
 docker stop discountdb
+
+# Basket PostgreSQL durdur
+docker stop basketpostgres
 
 # Basket (Redis) durdur
 docker stop basketdb
@@ -868,7 +905,7 @@ docker inspect catalogdb --format='{{.State.Status}}'
 docker compose stop catalogdb orderingdb discountdb
 
 # Tüm veritabanı container'larını durdur
-docker compose stop catalogdb orderingdb discountdb
+docker compose stop catalogdb orderingdb discountdb basketpostgres
 
 # Altyapı container'larını durdur (Redis, RabbitMQ)
 docker compose stop basketdb messagebroker
@@ -938,7 +975,7 @@ docker compose ps
 **Senaryo 4: Tüm Veritabanlarını Durdur, Diğerleri Çalışır Durumda Kalsın**
 ```bash
 # Sadece PostgreSQL container'larını durdur
-docker compose stop catalogdb orderingdb discountdb
+docker compose stop catalogdb orderingdb discountdb basketpostgres
 
 # Redis ve RabbitMQ çalışmaya devam eder
 docker compose ps
@@ -1243,6 +1280,7 @@ docker ps
 | `catalogdb` | PostgreSQL | 5436 | 5432 | - |
 | `orderingdb` | PostgreSQL | 5435 | 5432 | - |
 | `discountdb` | PostgreSQL | 5434 | 5432 | - |
+| `basketpostgres` | PostgreSQL | 5437 | 5432 | - |
 | `basketdb` | Redis | 6379 | 6379 | - |
 | `basketdb` | RedisInsight UI | 8001 | 8001 | http://localhost:8001 |
 | `messagebroker` | RabbitMQ AMQP | 5673 | 5672 | - |
