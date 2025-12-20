@@ -1,0 +1,142 @@
+Aşağıdaki notu direkt dokümantasyonuna koyabilirsin. “ValidationBehavior nasıl CreateProductValidator’ı buluyor?” sorusunu en sade ve net haliyle anlatıyor.
+
+---
+
+## Not: `ValidationBehavior` içindeyken `CreateProductValidator` nasıl “kendiliğinden” çalışıyor?
+
+### Kısa cevap
+
+`ValidationBehavior` **CreateProductValidator’ı hiç tanımaz**.
+Ama **DI (Dependency Injection) container** onu `IValidator<CreateProductCommand>` olarak kaydettiği için, MediatR `Send(CreateProductCommand)` çalıştırırken `ValidationBehavior`’a otomatik **enjekte eder**. Behavior da elindeki tüm validator’ları `ValidateAsync` ile çalıştırır.
+
+---
+
+## 1) Bu otomatikliği sağlayan şey ne?
+
+İki ayrı kayıt var ve ikisi birlikte “magic”i oluşturuyor:
+
+### A) FluentValidation tarafı (Validator kayıtları)
+
+Genelde şunu yapıyoruz:
+
+```csharp
+builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
+```
+
+Bu satır şunu yapar:
+
+* Assembly içinde `AbstractValidator<T>` türevlerini arar
+* Mesela şunu bulur:
+
+```csharp
+public class CreateProductValidator : AbstractValidator<CreateProductCommand>
+```
+
+* Ve DI container’a şuna eşdeğer şekilde kaydeder:
+
+```csharp
+services.AddScoped<IValidator<CreateProductCommand>, CreateProductValidator>();
+```
+
+✅ Sonuç: DI artık `IValidator<CreateProductCommand>` istenirse `CreateProductValidator` döndürebilir.
+
+---
+
+### B) MediatR tarafı (Behavior kayıtları)
+
+Şunu yaptık:
+
+```csharp
+cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+```
+
+Bu kayıt sayesinde MediatR her `Send()` çağrısında pipeline oluştururken `ValidationBehavior<TRequest,TResponse>`’ı da zincire dahil eder.
+
+✅ Sonuç: Her request için MediatR, ilgili generic tiplerle behavior instance’ını DI’dan çözer.
+
+---
+
+## 2) “Tam olarak ne zaman” CreateProductValidator geliyor?
+
+Şu anda istek gönderiliyor:
+
+```csharp
+await _mediator.Send(new CreateProductCommand(...));
+```
+
+Bu anda:
+
+* `TRequest = CreateProductCommand`
+* `TResponse = Guid` (örnek)
+
+MediatR pipeline kurarken DI’dan şunu ister:
+
+* `IPipelineBehavior<CreateProductCommand, Guid>`
+
+  * bu da `ValidationBehavior<CreateProductCommand, Guid>` demektir.
+
+DI, `ValidationBehavior`’ı oluştururken constructor’a bakar:
+
+```csharp
+public ValidationBehavior(IEnumerable<IValidator<TRequest>> validators)
+```
+
+Burada `TRequest = CreateProductCommand` olduğuna göre DI şu listeyi üretmek zorunda:
+
+👉 `IEnumerable<IValidator<CreateProductCommand>>`
+
+DI container’da daha önce şunu kayıt etmiştik:
+
+* `IValidator<CreateProductCommand> -> CreateProductValidator`
+
+O yüzden `_validators` listesi içinde **CreateProductValidator** gelir.
+
+---
+
+## 3) ValidationBehavior o validator’ı nasıl çalıştırıyor?
+
+Behavior içindeki şu satır:
+
+```csharp
+_validators.Select(v => v.ValidateAsync(context, cancellationToken))
+```
+
+`_validators` içinde `CreateProductValidator` olduğu için şu çalışmış olur:
+
+```csharp
+createProductValidator.ValidateAsync(context, cancellationToken);
+```
+
+Ve validator’ın constructor’ında yazdığın:
+
+```csharp
+RuleFor(x => x.Name).NotEmpty()...
+RuleFor(x => x.Price).GreaterThan(0)...
+RuleFor(x => x.CategoryId).NotEmpty()...
+```
+
+kuralları işletilir.
+
+---
+
+## 4) Neden ValidationBehavior “hangi validator” olduğunu bilmek zorunda değil?
+
+Çünkü tasarım şu:
+
+* `ValidationBehavior` sadece şunu bilir:
+  “Bu request için DI bana hangi `IValidator<TRequest>` verdiyse onları çalıştırırım.”
+* Hangi request gelirse:
+
+  * `CreateProductCommand` → `CreateProductValidator`
+  * `UpdateProductCommand` → `UpdateProductValidator`
+  * vs.
+
+✅ Bu sayede yeni validator eklediğinde behavior’a dokunmazsın.
+
+---
+
+## 5) En kısa “tek cümle” özet
+
+**CreateProductValidator, `AddValidatorsFromAssembly` ile DI’a `IValidator<CreateProductCommand>` olarak kaydolduğu için; MediatR `Send(CreateProductCommand)` sırasında `ValidationBehavior<CreateProductCommand, Guid>` oluşturulurken DI tarafından otomatik enjekte edilir ve `ValidateAsync` ile çalıştırılır.**
+
+---

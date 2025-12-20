@@ -1,0 +1,17 @@
+namespace Basket.API.Entities;
+
+public class ShoppingCart
+{
+    public Guid Id { get; set; }
+    public string UserName { get; set; } = default!;
+    public List<ShoppingCartItem> Items { get; set; } = new();
+    
+    public decimal TotalPrice
+    {
+        get
+        {
+            return Items.Sum(item => item.Price * item.Quantity);
+        }
+    }
+}
+

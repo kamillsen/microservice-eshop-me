@@ -673,18 +673,22 @@ Basket Service, kullanıcıların **alışveriş sepetini** yönetir. Sepete ür
 ```
 1. Kullanıcı: "iPhone 15'i sepete ekle, adet: 2"
 2. Basket Service: 
-   - Sepeti Redis'ten al (yoksa yeni oluştur)
+   - Sepeti Redis'ten al (cache) veya PostgreSQL'den al (cache-aside pattern)
    - Ürünü sepete ekle
    - Discount Service'e gRPC ile bağlan → İndirim var mı kontrol et
    - Toplam fiyatı hesapla (indirim dahil)
-   - Redis'e kaydet
+   - PostgreSQL'e kaydet (source of truth)
+   - Redis'e kaydet (cache)
 3. Response: { userName, items: [...], totalPrice: 95000 }
 ```
 
 **Senaryo 2: Kullanıcı Sepeti Görüntülüyor**
 ```
 1. Kullanıcı: "Sepetimi göster"
-2. Basket Service: Redis'ten sepeti al
+2. Basket Service: 
+   - Önce Redis'e bak (cache)
+   - Redis'te yoksa PostgreSQL'den al (cache-aside pattern)
+   - PostgreSQL'den aldıktan sonra Redis'e yaz (cache)
 3. Response: { 
      userName: "user1",
      items: [
@@ -700,10 +704,11 @@ Basket Service, kullanıcıların **alışveriş sepetini** yönetir. Sepete ür
 ```
 1. Kullanıcı: POST /api/baskets/checkout { shippingAddress, paymentInfo }
 2. Basket Service:
-   - Sepeti Redis'ten al
+   - Sepeti Redis'ten veya PostgreSQL'den al (cache-aside pattern)
    - BasketCheckoutEvent oluştur (tüm bilgilerle)
    - RabbitMQ'ya event gönder (Ordering Service dinleyecek)
-   - Sepeti Redis'ten sil
+   - Sepeti PostgreSQL'den sil (source of truth)
+   - Sepeti Redis'ten sil (cache)
 3. Response: { success: true, message: "Sipariş oluşturuldu" }
 ```
 
@@ -712,7 +717,7 @@ Basket Service, kullanıcıların **alışveriş sepetini** yönetir. Sepete ür
 | Özellik | Değer |
 |---------|-------|
 | **Port** | 8080 (internal) |
-| **Database** | Redis (Key-Value, hızlı erişim) |
+| **Database** | Redis + PostgreSQL (Cache-aside pattern) |
 | **Pattern** | CQRS + MediatR |
 | **gRPC Client** | Discount.Grpc (indirim sorgulama) |
 | **Publishes** | BasketCheckoutEvent (RabbitMQ) |
@@ -724,10 +729,12 @@ DELETE /api/baskets/{userName}          # DeleteBasketCommand (Sepeti sil)
 POST   /api/baskets/checkout            # CheckoutBasketCommand (Ödeme - RabbitMQ event)
 ```
 
-**Neden Redis?**
-- Sepet geçici veri (kullanıcı çıkış yapınca silinebilir)
-- Çok hızlı okuma/yazma gerekiyor
-- Key-Value yapısı sepet için ideal (`basket:user1` → JSON)
+**Neden Redis + PostgreSQL?**
+- **Redis (Cache):** Hızlı okuma/yazma için (kullanıcı deneyimi)
+- **PostgreSQL (Source of Truth):** Veri kalıcılığı için (veri kaybı riski düşük)
+- **Cache-aside Pattern:** Önce Redis'e bak, yoksa PostgreSQL'den al ve cache'le
+- Redis down olsa bile PostgreSQL'den okur (yavaş ama çalışır)
+- Sepet geçmişi tutulabilir (analiz için)
 
 ---
 
@@ -957,7 +964,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: CatalogDb
     ports:
-      - "5432:5432"
+      - "5436:5432"  # Host port 5436 (sistem PostgreSQL port 5432'de çalıştığı için çakışmayı önlemek için)
     volumes:
       - catalogdb_data:/var/lib/postgresql/data
 
@@ -969,6 +976,28 @@ services:
       - "8001:8001"      # RedisInsight UI
     volumes:
       - basketdb_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  basketpostgres:
+    image: postgres:16-alpine
+    container_name: basketpostgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: BasketDb
+    ports:
+      - "5437:5432"  # Host port 5437 (diğer PostgreSQL'lerle çakışmaması için)
+    volumes:
+      - basketpostgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   orderingdb:
     image: postgres:16-alpine
@@ -1022,6 +1051,7 @@ services:
       - catalogdb
       - orderingdb
       - discountdb
+      - basketpostgres
 
   # ==================== SERVICES ====================
 
@@ -1034,6 +1064,8 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__Database=Host=catalogdb;Port=5432;Database=CatalogDb;Username=postgres;Password=postgres
+      # Not: Container network içinde Port=5432 (container içindeki port)
+      # Localhost'tan bağlanırken: Host=localhost;Port=5436 (host port)
     depends_on:
       - catalogdb
     ports:
@@ -1048,10 +1080,12 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__Redis=basketdb:6379
+      - ConnectionStrings__Database=Host=basketpostgres;Port=5432;Database=BasketDb;Username=postgres;Password=postgres
       - GrpcSettings__DiscountUrl=http://discount.grpc:8080
       - MessageBroker__Host=amqp://guest:guest@messagebroker:5673
     depends_on:
       - basketdb
+      - basketpostgres
       - discount.grpc
       - messagebroker
     ports:
@@ -1105,6 +1139,7 @@ services:
 volumes:
   catalogdb_data:
   basketdb_data:
+  basketpostgres_data:
   orderingdb_data:
   discountdb_data:
   rabbitmq_data:
@@ -1602,8 +1637,8 @@ public class DiscountGrpcService
 
 | Servis | Veritabanı | Port | Neden? |
 |--------|------------|------|--------|
-| Catalog | PostgreSQL | 5432 | İlişkisel veri (Products, Categories) |
-| Basket | Redis | 6379 | Hızlı cache, key-value (sepet geçici) |
+| Catalog | PostgreSQL | 5436 | İlişkisel veri (Products, Categories) (Host port: 5436, container port: 5432) |
+| Basket | Redis + PostgreSQL | 6379, 5437 | Redis (cache) + PostgreSQL (source of truth) - Cache-aside pattern |
 | Ordering | PostgreSQL | 5435 | İlişkisel veri (Orders, OrderItems) (5433 kullanılıyordu, 5435'e değiştirildi) |
 | Discount | PostgreSQL | 5434 | İlişkisel veri (Coupons) |
 
@@ -1619,8 +1654,10 @@ Her microservice'in kendi veritabanı var:
        │                    │                    │
        ▼                    ▼                    ▼
 ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│  PostgreSQL  │     │    Redis     │     │  PostgreSQL  │
-│  (CatalogDb) │     │              │     │ (OrderingDb) │
+│  PostgreSQL  │     │  Redis +     │     │  PostgreSQL  │
+│  (CatalogDb) │     │  PostgreSQL  │     │ (OrderingDb) │
+│              │     │  (Cache +    │     │              │
+│              │     │   Source)    │     │              │
 └──────────────┘     └──────────────┘     └──────────────┘
 ```
 
@@ -1833,7 +1870,7 @@ src/BuildingBlocks/
 | Servis | Health Check | Paket |
 |--------|--------------|-------|
 | **Catalog.API** | PostgreSQL | `AspNetCore.HealthChecks.NpgSql` |
-| **Basket.API** | Redis | `AspNetCore.HealthChecks.Redis` |
+| **Basket.API** | Redis + PostgreSQL | `AspNetCore.HealthChecks.Redis`, `AspNetCore.HealthChecks.NpgSql` |
 | **Ordering.API** | PostgreSQL + RabbitMQ | `AspNetCore.HealthChecks.NpgSql`, `AspNetCore.HealthChecks.RabbitMQ` |
 | **Discount.Grpc** | PostgreSQL | `AspNetCore.HealthChecks.NpgSql` |
 | **Gateway.API** | Downstream services | `AspNetCore.HealthChecks.Uris` |
@@ -1874,10 +1911,11 @@ healthcheck:
 
 | Veritabanı | Port | Container Adı |
 |------------|------|---------------|
-| CatalogDb (PostgreSQL) | 5432 | catalogdb |
+| CatalogDb (PostgreSQL) | 5436 | catalogdb (Host port: 5436, container port: 5432 - sistem PostgreSQL ile çakışmayı önlemek için) |
 | OrderingDb (PostgreSQL) | 5435 | orderingdb (5433 kullanılıyordu, 5435'e değiştirildi) |
 | DiscountDb (PostgreSQL) | 5434 | discountdb |
 | BasketDb (Redis) | 6379 | basketdb |
+| BasketDb (PostgreSQL) | 5437 | basketpostgres (Host port: 5437, container port: 5432) |
 
 ### UI & Yönetim Panelleri
 
@@ -1886,7 +1924,7 @@ healthcheck:
 | **RabbitMQ Management** | http://localhost:15673 | guest / guest (15672 kullanılıyordu, 15673'e değiştirildi) |
 | **RedisInsight** | http://localhost:8001 | - |
 | **pgAdmin** | http://localhost:5050 | admin@admin.com / admin |
-| **Swagger (Catalog)** | http://localhost:5001/swagger | - |
+| **Swagger (Catalog)** | http://localhost:5001/ | - |
 | **Swagger (Basket)** | http://localhost:5002/swagger | - |
 | **Swagger (Ordering)** | http://localhost:5003/swagger | - |
 | **Gateway** | http://localhost:5000 | - |
