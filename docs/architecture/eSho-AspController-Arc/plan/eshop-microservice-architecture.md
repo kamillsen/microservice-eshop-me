@@ -673,18 +673,22 @@ Basket Service, kullanıcıların **alışveriş sepetini** yönetir. Sepete ür
 ```
 1. Kullanıcı: "iPhone 15'i sepete ekle, adet: 2"
 2. Basket Service: 
-   - Sepeti Redis'ten al (yoksa yeni oluştur)
+   - Sepeti Redis'ten al (cache) veya PostgreSQL'den al (cache-aside pattern)
    - Ürünü sepete ekle
    - Discount Service'e gRPC ile bağlan → İndirim var mı kontrol et
    - Toplam fiyatı hesapla (indirim dahil)
-   - Redis'e kaydet
+   - PostgreSQL'e kaydet (source of truth)
+   - Redis'e kaydet (cache)
 3. Response: { userName, items: [...], totalPrice: 95000 }
 ```
 
 **Senaryo 2: Kullanıcı Sepeti Görüntülüyor**
 ```
 1. Kullanıcı: "Sepetimi göster"
-2. Basket Service: Redis'ten sepeti al
+2. Basket Service: 
+   - Önce Redis'e bak (cache)
+   - Redis'te yoksa PostgreSQL'den al (cache-aside pattern)
+   - PostgreSQL'den aldıktan sonra Redis'e yaz (cache)
 3. Response: { 
      userName: "user1",
      items: [
@@ -700,10 +704,11 @@ Basket Service, kullanıcıların **alışveriş sepetini** yönetir. Sepete ür
 ```
 1. Kullanıcı: POST /api/baskets/checkout { shippingAddress, paymentInfo }
 2. Basket Service:
-   - Sepeti Redis'ten al
+   - Sepeti Redis'ten veya PostgreSQL'den al (cache-aside pattern)
    - BasketCheckoutEvent oluştur (tüm bilgilerle)
    - RabbitMQ'ya event gönder (Ordering Service dinleyecek)
-   - Sepeti Redis'ten sil
+   - Sepeti PostgreSQL'den sil (source of truth)
+   - Sepeti Redis'ten sil (cache)
 3. Response: { success: true, message: "Sipariş oluşturuldu" }
 ```
 
@@ -971,6 +976,28 @@ services:
       - "8001:8001"      # RedisInsight UI
     volumes:
       - basketdb_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  basketpostgres:
+    image: postgres:16-alpine
+    container_name: basketpostgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: BasketDb
+    ports:
+      - "5437:5432"  # Host port 5437 (diğer PostgreSQL'lerle çakışmaması için)
+    volumes:
+      - basketpostgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   orderingdb:
     image: postgres:16-alpine
@@ -1024,6 +1051,7 @@ services:
       - catalogdb
       - orderingdb
       - discountdb
+      - basketpostgres
 
   # ==================== SERVICES ====================
 
@@ -1052,10 +1080,12 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__Redis=basketdb:6379
+      - ConnectionStrings__Database=Host=basketpostgres;Port=5432;Database=BasketDb;Username=postgres;Password=postgres
       - GrpcSettings__DiscountUrl=http://discount.grpc:8080
       - MessageBroker__Host=amqp://guest:guest@messagebroker:5673
     depends_on:
       - basketdb
+      - basketpostgres
       - discount.grpc
       - messagebroker
     ports:
@@ -1109,6 +1139,7 @@ services:
 volumes:
   catalogdb_data:
   basketdb_data:
+  basketpostgres_data:
   orderingdb_data:
   discountdb_data:
   rabbitmq_data:

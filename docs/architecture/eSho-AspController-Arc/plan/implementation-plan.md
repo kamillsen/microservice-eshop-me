@@ -688,7 +688,7 @@ amqp://{username}:{password}@{hostname}:{port}
 - `BasketsController` oluştur
 - Swagger konfigürasyonu
 - Exception middleware ekle
-- Health checks ekle (Redis)
+- Health checks ekle (Redis + PostgreSQL)
 
 **Test:**
 - Swagger açılıyor mu? (http://localhost:5002/swagger)
