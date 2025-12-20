@@ -1,6 +1,6 @@
-# Faz 5.1, 5.2 & 5.3 - Basket.API Projesi, Redis Repository ve gRPC Client Notları
+# Faz 5.1, 5.2, 5.3, 5.4 & 5.5 - Basket.API Projesi, Redis Repository, gRPC Client, CQRS ve Controller Notları
 
-> Bu dosya, Faz 5.1 (Basket.API Projesi Oluştur), Faz 5.2 (Basket Redis Repository) ve Faz 5.3 (Basket gRPC Client) adım adım yaparken öğrendiklerimi not aldığım dosyadır.
+> Bu dosya, Faz 5.1 (Basket.API Projesi Oluştur), Faz 5.2 (Basket Redis Repository), Faz 5.3 (Basket gRPC Client), Faz 5.4 (Basket CQRS - Commands & Queries) ve Faz 5.5 (Basket Controller & Entegrasyon) adım adım yaparken öğrendiklerimi not aldığım dosyadır.
 > 
 > **İçerik:**
 > - Faz 5.1: Basket.API Projesi Oluştur
@@ -21,6 +21,19 @@
 >   - .csproj dosyasına proto reference ekle
 >   - DiscountGrpcService oluştur
 >   - Program.cs'de gRPC client konfigürasyonu
+> - Faz 5.4: Basket CQRS - Commands & Queries
+>   - Adım 1: MediatR, FluentValidation, AutoMapper konfigürasyonu
+>   - Adım 2: DTO'ları oluştur
+>   - Adım 3: AutoMapper Profile oluştur
+>   - Adım 4: GetBasketQuery + GetBasketHandler
+>   - Adım 5: StoreBasketCommand + StoreBasketHandler + StoreBasketValidator
+>   - Adım 6: DeleteBasketCommand + DeleteBasketHandler
+>   - Adım 7: CheckoutBasketCommand + CheckoutBasketHandler + CheckoutBasketValidator
+>   - Adım 8: MassTransit konfigürasyonu
+> - Faz 5.5: Basket Controller & Entegrasyon
+>   - BasketsController oluştur
+>   - Exception Handler Middleware ekle
+>   - Health Checks ekle
 
 ---
 
@@ -330,8 +343,13 @@ mkdir -p Mapping
 
 3. **`Features/Basket/`** → CQRS (Vertical Slice)
    - **`Commands/`**: Yazma işlemleri (StoreBasket, DeleteBasket, CheckoutBasket)
+     - **`StoreBasket/`**: StoreBasketCommand, StoreBasketHandler, StoreBasketValidator
+     - **`DeleteBasket/`**: DeleteBasketCommand, DeleteBasketHandler
+     - **`CheckoutBasket/`**: CheckoutBasketCommand, CheckoutBasketHandler, CheckoutBasketValidator
    - **`Queries/`**: Okuma işlemleri (GetBasket)
+     - **`GetBasket/`**: GetBasketQuery, GetBasketHandler
    - **Neden?**: CQRS pattern, her feature kendi klasöründe
+   - **Validator'lar:** ValidationBehavior tarafından otomatik uygulanır (AddValidatorsFromAssembly ile kayıtlı)
 
 4. **`GrpcServices/`** → gRPC client wrapper
    - **`DiscountGrpcService.cs`**: Discount Service'e gRPC ile bağlanan wrapper class
@@ -1559,16 +1577,1318 @@ dotnet build src/Services/Basket/Basket.API/Basket.API.csproj
 - **Singleton:** Uygulama boyunca tek instance (IConnectionMultiplexer, gRPC Client)
 - **Scoped:** Her request için yeni instance (Repository, DiscountGrpcService)
 
-### Sonraki Adım:
-**Faz 5.4: Basket CQRS - Commands & Queries**
-- GetBasketQuery + GetBasketHandler
-- StoreBasketCommand + StoreBasketHandler
-- DeleteBasketCommand + DeleteBasketHandler
-- CheckoutBasketCommand + CheckoutBasketHandler
+---
+
+## Faz 5.4: Basket CQRS - Commands & Queries
+
+**Hedef:** Sepet işlemleri (CQRS + MediatR)
+
+### CQRS Pattern Nedir?
+
+**CQRS** (Command Query Responsibility Segregation) = Komut ve sorgu sorumluluklarını ayırma
+
+**Ne demek?**
+- **Command** → Yazma işlemleri (Create, Update, Delete)
+- **Query** → Okuma işlemleri (Read, Get)
+- Her işlem için ayrı handler (Single Responsibility)
+
+**Neden CQRS?**
+- Kod organizasyonu (her feature kendi klasöründe)
+- Test edilebilirlik (her handler ayrı test edilir)
+- Esneklik (farklı veri kaynakları kullanılabilir)
+- MediatR ile kolay implementasyon
+
+---
+
+## Adım 1: MediatR, FluentValidation, AutoMapper Konfigürasyonu
+
+**Dosya:** `Program.cs`
+
+**Kod:**
+```csharp
+// MediatR
+builder.Services.AddMediatR(cfg =>
+{
+    cfg.RegisterServicesFromAssembly(typeof(Program).Assembly);
+    cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
+    cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+});
+
+// FluentValidation
+builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
+
+// AutoMapper
+builder.Services.AddAutoMapper(typeof(Program).Assembly);
+```
+
+**Açıklamalar:**
+
+### MediatR Konfigürasyonu
+
+#### `RegisterServicesFromAssembly(typeof(Program).Assembly)`
+- **Ne yapar:** `Basket.API` assembly'sini tarar
+- **Ne bulur:** `IRequestHandler<TRequest, TResponse>` implement eden tüm class'ları
+- **Ne kaydeder:** Handler'ları DI container'a kaydeder (Transient)
+
+**Örnek:**
+- `GetBasketHandler : IRequestHandler<GetBasketQuery, ShoppingCartDto>` → Bulunur ve kaydedilir
+- `StoreBasketHandler : IRequestHandler<StoreBasketCommand, ShoppingCartDto>` → Bulunur ve kaydedilir
+
+#### `AddBehavior(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>))`
+- **Ne yapar:** Pipeline'a `LoggingBehavior` ekler
+- **Ne işe yarar:** Her request öncesi ve sonrası loglama yapar
+- **Akış:** Request → LoggingBehavior → Handler → LoggingBehavior → Response
+
+#### `AddBehavior(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>))`
+- **Ne yapar:** Pipeline'a `ValidationBehavior` ekler
+- **Ne işe yarar:** Her request öncesi FluentValidation çalıştırır
+- **Akış:** Request → ValidationBehavior → Handler → Response
+- **Hata durumu:** Validation hatası varsa → `ValidationException` fırlatır, Handler'a gitmez
+
+### FluentValidation Konfigürasyonu
+
+#### `AddValidatorsFromAssembly(typeof(Program).Assembly)`
+- **Ne yapar:** `Basket.API` assembly'sini tarar
+- **Ne bulur:** `AbstractValidator<T>` implement eden tüm class'ları
+- **Ne kaydeder:** Validator'ları DI container'a kaydeder (Scoped)
+
+**Örnek:**
+- `StoreBasketValidator : AbstractValidator<StoreBasketCommand>` → Bulunur ve kaydedilir
+- `CheckoutBasketValidator : AbstractValidator<CheckoutBasketCommand>` → Bulunur ve kaydedilir
+
+### AutoMapper Konfigürasyonu
+
+#### `AddAutoMapper(typeof(Program).Assembly)`
+- **Ne yapar:** `Basket.API` assembly'sini tarar
+- **Ne bulur:** `Profile` class'ından inherit eden tüm class'ları
+- **Ne kaydeder:** AutoMapper'ı DI container'a kaydeder (Singleton)
+
+**Örnek:**
+- `MappingProfile : Profile` → Bulunur ve kaydedilir
+
+### MediatR Pipeline Akışı
+
+```
+Controller → MediatR.Send(GetBasketQuery)
+    ↓
+┌─────────────────────────────────────┐
+│  MediatR Pipeline Başlar           │
+└─────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────┐
+│  1. LoggingBehavior                 │
+│     - "Handling GetBasketQuery..."  │
+│     - Request'i loglar              │
+└─────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────┐
+│  2. ValidationBehavior              │
+│     - Request tipine göre validator'ları bul │
+│     - Örnek: StoreBasketCommand → StoreBasketValidator │
+│     - Örnek: CheckoutBasketCommand → CheckoutBasketValidator │
+│     - Tüm validator'ları çalıştır (ValidateAsync) │
+│     - Hata varsa: ValidationException fırlat │
+│     - Hata yoksa: Handler'a geçer │
+└─────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────┐
+│  3. GetBasketHandler.Handle()       │
+│     - Repository'den sepeti al      │
+│     - gRPC ile indirim sorgula      │
+│     - DTO'ya map et                 │
+│     - Return ShoppingCartDto        │
+└─────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────┐
+│  4. LoggingBehavior                │
+│     - "Handled GetBasketQuery: {...}"│
+│     - Response'u loglar             │
+└─────────────────────────────────────┘
+    ↓
+Controller'a response döner
+```
+
+### ValidationBehavior Nasıl Çalışır?
+
+**ValidationBehavior** = Her request için otomatik validation yapar
+
+**Nasıl çalışır?**
+
+1. **DI'dan Validator'ları Alır**
+   ```csharp
+   private readonly IEnumerable<IValidator<TRequest>> _validators;
+   ```
+   - DI container'dan request tipine göre tüm validator'ları alır
+   - Örnek: `StoreBasketCommand` için → `StoreBasketValidator` bulunur
+   - Örnek: `CheckoutBasketCommand` için → `CheckoutBasketValidator` bulunur
+
+2. **Validator Var mı Kontrol Eder**
+   ```csharp
+   if (_validators.Any())
+   ```
+   - Request için validator var mı kontrol eder
+   - Validator yoksa → Direkt handler'a geçer
+
+3. **Tüm Validator'ları Çalıştırır**
+   ```csharp
+   var validationResults = await Task.WhenAll(
+       _validators.Select(v => v.ValidateAsync(context, cancellationToken)));
+   ```
+   - Her validator için `ValidateAsync()` çağrılır
+   - Paralel çalıştırılır (Task.WhenAll)
+   - Tüm sonuçlar toplanır
+
+4. **Hata Kontrolü**
+   ```csharp
+   if (failures.Any())
+   {
+       throw new ValidationException(failures);
+   }
+   ```
+   - Hata varsa → `ValidationException` fırlatır
+   - Handler'a gitmez
+   - Hata yoksa → Handler'a geçer
+
+### Örnek: StoreBasketCommand Validation Akışı
+
+```
+Controller → MediatR.Send(StoreBasketCommand)
+    ↓
+ValidationBehavior çalışır
+    ↓
+DI Container: "StoreBasketCommand için validator var mı?"
+    ↓
+StoreBasketValidator bulunur (AddValidatorsFromAssembly ile kayıtlı)
+    ↓
+StoreBasketValidator.ValidateAsync() çağrılır
+    ↓
+Validation Kuralları:
+  - Basket.UserName → NotEmpty
+  - Basket.Items → NotNull
+  - Her Item için ShoppingCartItemValidator çalışır
+    ↓
+Hata varsa → ValidationException fırlatır (400 Bad Request)
+Hata yoksa → StoreBasketHandler'a geçer
+```
+
+### Örnek: CheckoutBasketCommand Validation Akışı
+
+```
+Controller → MediatR.Send(CheckoutBasketCommand)
+    ↓
+ValidationBehavior çalışır
+    ↓
+DI Container: "CheckoutBasketCommand için validator var mı?"
+    ↓
+CheckoutBasketValidator bulunur (AddValidatorsFromAssembly ile kayıtlı)
+    ↓
+CheckoutBasketValidator.ValidateAsync() çağrılır
+    ↓
+Validation Kuralları:
+  - UserName → NotEmpty
+  - EmailAddress → NotEmpty + EmailAddress format
+  - AddressLine → NotEmpty
+  - CardNumber → NotEmpty + Length(16)
+  - CVV → NotEmpty + Length(3)
+    ↓
+Hata varsa → ValidationException fırlatır (400 Bad Request)
+Hata yoksa → CheckoutBasketHandler'a geçer
+```
+
+### Neden Otomatik Çalışıyor?
+
+**AddValidatorsFromAssembly** = Assembly'deki tüm validator'ları otomatik bulur ve kaydeder
+
+**Ne yapar?**
+- `Basket.API` assembly'sini tarar
+- `AbstractValidator<T>` implement eden tüm class'ları bulur
+- DI container'a kaydeder
+
+**Örnek:**
+- `StoreBasketValidator : AbstractValidator<StoreBasketCommand>` → Bulunur ve kaydedilir
+- `CheckoutBasketValidator : AbstractValidator<CheckoutBasketCommand>` → Bulunur ve kaydedilir
+- `ShoppingCartItemValidator : AbstractValidator<ShoppingCartItemDto>` → Bulunur ve kaydedilir
+
+**DI Container'da Ne Oluyor?**
+```csharp
+// AddValidatorsFromAssembly şunları kaydeder:
+- IValidator<StoreBasketCommand> → StoreBasketValidator (Scoped)
+- IValidator<CheckoutBasketCommand> → CheckoutBasketValidator (Scoped)
+- IValidator<ShoppingCartItemDto> → ShoppingCartItemValidator (Scoped)
+```
+
+**ValidationBehavior Constructor'da:**
+```csharp
+public ValidationBehavior(IEnumerable<IValidator<TRequest>> validators)
+{
+    _validators = validators;  // ← DI'dan tüm validator'lar gelir
+}
+```
+
+**Örnek: StoreBasketCommand geldiğinde:**
+```csharp
+// DI Container şunları sağlar:
+IEnumerable<IValidator<StoreBasketCommand>> validators = [
+    StoreBasketValidator instance
+];
+```
+
+**Sonuç:**
+- MediatR, FluentValidation, AutoMapper konfigürasyonu tamamlandı
+- Pipeline behaviors eklendi (Logging, Validation)
+- Handler'lar ve Validator'lar otomatik bulunacak
+- **Kendi yazdığımız validator'lar (StoreBasketValidator, CheckoutBasketValidator) otomatik olarak ValidationBehavior tarafından uygulanır**
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Basket/Basket.API/Basket.API.csproj
+# Build başarılı olmalı (0 hata, 0 uyarı)
+```
+
+---
+
+## Adım 2: DTO'ları Oluştur
+
+**Klasör:** `Dtos/`
+
+### ShoppingCartDto.cs
+
+**Dosya:** `Dtos/ShoppingCartDto.cs`
+
+**Ne işe yarar:** API response'ları için sepet DTO'su
+
+**Özellikler:**
+- `UserName` → Kullanıcı adı
+- `Items` → Sepet item'ları listesi (`List<ShoppingCartItemDto>`)
+- `TotalPrice` → Toplam fiyat (indirim sonrası)
+- `Discount` → Toplam indirim miktarı
+
+**Neden DTO?**
+- Entity'ler internal (Redis'te tutulur)
+- DTO'lar external (API'ye döner)
+- Entity'den farklı property'ler olabilir (Discount gibi)
+
+### ShoppingCartItemDto.cs
+
+**Dosya:** `Dtos/ShoppingCartItemDto.cs`
+
+**Ne işe yarar:** API response'ları için sepet item DTO'su
+
+**Özellikler:**
+- `ProductId` → Ürün ID'si
+- `ProductName` → Ürün adı
+- `Quantity` → Miktar
+- `Price` → Birim fiyat
+
+**Sonuç:**
+- `Dtos/ShoppingCartDto.cs` oluşturuldu
+- `Dtos/ShoppingCartItemDto.cs` oluşturuldu
+
+---
+
+## Adım 3: AutoMapper Profile Oluştur
+
+**Dosya:** `Mapping/MappingProfile.cs`
+
+**Ne işe yarar:** Entity ↔ DTO ve Command ↔ Event mapping'lerini tanımlar
+
+**Mapping'ler:**
+1. **ShoppingCart → ShoppingCartDto**
+   - `Discount` property'si ignore edilir (manuel hesaplanacak)
+2. **ShoppingCartDto → ShoppingCart** (Reverse mapping)
+   - StoreBasket için kullanılır
+3. **ShoppingCartItem → ShoppingCartItemDto**
+4. **ShoppingCartItemDto → ShoppingCartItem** (Reverse mapping)
+5. **CheckoutBasketCommand → BasketCheckoutEvent**
+   - Checkout işlemi için kullanılır
+   - `TotalPrice` ignore edilir (basket'ten alınacak)
+
+**Neden AutoMapper?**
+- Manuel mapping kodları yazmaya gerek yok
+- Type-safe mapping
+- Kolay bakım
+
+**Sonuç:**
+- `Mapping/MappingProfile.cs` oluşturuldu
+- Tüm mapping'ler tanımlandı
+
+---
+
+## Adım 4: GetBasketQuery + GetBasketHandler
+
+**Klasör:** `Features/Basket/Queries/GetBasket/`
+
+### GetBasketQuery.cs
+
+**Dosya:** `Features/Basket/Queries/GetBasket/GetBasketQuery.cs`
+
+**Ne işe yarar:** Sepeti getirmek için query (MediatR request)
+
+**Özellikler:**
+- `record GetBasketQuery(string UserName) : IRequest<ShoppingCartDto>`
+- `IRequest<TResponse>` → MediatR request interface'i
+- `TResponse` → `ShoppingCartDto` (dönüş tipi)
+
+**Neden record?**
+- Immutable (değiştirilemez)
+- Value equality (değer bazlı karşılaştırma)
+- Daha az kod (constructor, equality otomatik)
+
+### GetBasketHandler.cs
+
+**Dosya:** `Features/Basket/Queries/GetBasket/GetBasketHandler.cs`
+
+**Ne işe yarar:** GetBasketQuery'yi işler (Redis'ten sepeti alır, indirim hesaplar)
+
+**Dependencies:**
+- `IBasketRepository` → Redis'ten sepeti almak için
+- `DiscountGrpcService` → İndirim sorgulamak için
+- `IMapper` → Entity'den DTO'ya map etmek için
+- `ILogger` → Loglama için
+
+**Adım adım ne yapıyor?**
+
+1. **Redis'ten sepeti al**
+   ```csharp
+   var basket = await _repository.GetBasket(request.UserName);
+   ```
+   - Sepet yoksa → Boş sepet döndürür (hata fırlatmaz)
+
+2. **Her item için indirim sorgula (gRPC)**
+   ```csharp
+   foreach (var item in basket.Items)
+   {
+       var coupon = await _discountGrpcService.GetDiscount(item.ProductName);
+       if (coupon.Amount > 0)
+       {
+           totalDiscount += coupon.Amount * item.Quantity;
+       }
+   }
+   ```
+   - Her ürün için ayrı gRPC sorgusu
+   - Toplam indirimi hesaplar
+
+3. **DTO'ya map et**
+   ```csharp
+   var basketDto = _mapper.Map<ShoppingCartDto>(basket);
+   basketDto.Discount = totalDiscount;
+   basketDto.TotalPrice = basket.TotalPrice - totalDiscount;
+   ```
+   - Entity'den DTO'ya map eder
+   - Discount ve TotalPrice'ı hesaplar
+
+**Önemli Noktalar:**
+- Sepet yoksa → Boş sepet döndürür (hata fırlatmaz)
+- İndirim hesaplama → Her item için ayrı sorgu (gRPC hızlı)
+- TotalPrice → Basket.TotalPrice - Discount
+
+**Sonuç:**
+- `Features/Basket/Queries/GetBasket/GetBasketQuery.cs` oluşturuldu
+- `Features/Basket/Queries/GetBasket/GetBasketHandler.cs` oluşturuldu
+
+---
+
+## Adım 5: StoreBasketCommand + StoreBasketHandler + StoreBasketValidator
+
+**Klasör:** `Features/Basket/Commands/StoreBasket/`
+
+### StoreBasketCommand.cs
+
+**Dosya:** `Features/Basket/Commands/StoreBasket/StoreBasketCommand.cs`
+
+**Ne işe yarar:** Sepeti kaydetmek/güncellemek için command (MediatR request)
+
+**Özellikler:**
+- `record StoreBasketCommand(ShoppingCartDto Basket) : IRequest<ShoppingCartDto>`
+- `Basket` → Kaydedilecek sepet DTO'su
+- `IRequest<TResponse>` → MediatR request interface'i
+
+### StoreBasketValidator.cs
+
+**Dosya:** `Features/Basket/Commands/StoreBasket/StoreBasketValidator.cs`
+
+**Ne işe yarar:** StoreBasketCommand için validation kuralları
+
+**İki Validator Class:**
+
+#### 1. StoreBasketValidator
+- `Basket` → NotNull
+- `UserName` → NotEmpty
+- `Items` → NotNull
+- Her `Item` için → `ShoppingCartItemValidator` kullanır
+
+#### 2. ShoppingCartItemValidator
+- `ProductId` → NotEmpty
+- `ProductName` → NotEmpty
+- `Quantity` → GreaterThan(0)
+- `Price` → GreaterThan(0)
+
+**Validation Akışı:**
+```
+StoreBasketCommand geldi
+    ↓
+ValidationBehavior çalışır
+    ↓
+StoreBasketValidator.ValidateAsync() çağrılır
+    ↓
+Hata varsa → ValidationException fırlatır
+Hata yoksa → Handler'a geçer
+```
+
+### StoreBasketHandler.cs
+
+**Dosya:** `Features/Basket/Commands/StoreBasket/StoreBasketHandler.cs`
+
+**Ne işe yarar:** StoreBasketCommand'yi işler (Redis'e sepeti kaydeder)
+
+**Dependencies:**
+- `IBasketRepository` → Redis'e kaydetmek için
+- `IMapper` → DTO ↔ Entity mapping için
+- `ILogger` → Loglama için
+
+**Adım adım ne yapıyor?**
+
+1. **DTO'dan Entity'ye map et**
+   ```csharp
+   var basket = _mapper.Map<ShoppingCart>(request.Basket);
+   ```
+
+2. **Redis'e kaydet**
+   ```csharp
+   var savedBasket = await _repository.SaveBasket(basket);
+   ```
+   - Key yoksa oluşturur, varsa günceller (upsert)
+
+3. **Entity'den DTO'ya map et**
+   ```csharp
+   var basketDto = _mapper.Map<ShoppingCartDto>(savedBasket);
+   ```
+
+**Sonuç:**
+- `Features/Basket/Commands/StoreBasket/StoreBasketCommand.cs` oluşturuldu
+- `Features/Basket/Commands/StoreBasket/StoreBasketHandler.cs` oluşturuldu
+- `Features/Basket/Commands/StoreBasket/StoreBasketValidator.cs` oluşturuldu
+
+---
+
+## Adım 6: DeleteBasketCommand + DeleteBasketHandler
+
+**Klasör:** `Features/Basket/Commands/DeleteBasket/`
+
+### DeleteBasketCommand.cs
+
+**Dosya:** `Features/Basket/Commands/DeleteBasket/DeleteBasketCommand.cs`
+
+**Ne işe yarar:** Sepeti silmek için command (MediatR request)
+
+**Özellikler:**
+- `record DeleteBasketCommand(string UserName) : IRequest<bool>`
+- `UserName` → Silinecek sepetin kullanıcı adı
+- `IRequest<bool>` → Başarılı/başarısız döner
+
+### DeleteBasketHandler.cs
+
+**Dosya:** `Features/Basket/Commands/DeleteBasket/DeleteBasketHandler.cs`
+
+**Ne işe yarar:** DeleteBasketCommand'yi işler (Redis'ten sepeti siler)
+
+**Dependencies:**
+- `IBasketRepository` → Redis'ten silmek için
+- `ILogger` → Loglama için
+
+**Adım adım ne yapıyor?**
+
+1. **Redis'ten sil**
+   ```csharp
+   var deleted = await _repository.DeleteBasket(request.UserName);
+   ```
+
+2. **Loglama**
+   - Başarılıysa → Information log
+   - Başarısızsa → Warning log (sepet yoksa)
+
+3. **Return**
+   ```csharp
+   return deleted;  // true veya false
+   ```
+
+**Sonuç:**
+- `Features/Basket/Commands/DeleteBasket/DeleteBasketCommand.cs` oluşturuldu
+- `Features/Basket/Commands/DeleteBasket/DeleteBasketHandler.cs` oluşturuldu
+
+---
+
+## Adım 7: CheckoutBasketCommand + CheckoutBasketHandler + CheckoutBasketValidator
+
+**Klasör:** `Features/Basket/Commands/CheckoutBasket/`
+
+### CheckoutBasketCommand.cs
+
+**Dosya:** `Features/Basket/Commands/CheckoutBasket/CheckoutBasketCommand.cs`
+
+**Ne işe yarar:** Sepeti checkout etmek için command (RabbitMQ event gönderir)
+
+**Özellikler:**
+- `record CheckoutBasketCommand(...) : IRequest<bool>`
+- **Shipping Address:** FirstName, LastName, EmailAddress, AddressLine, Country, State, ZipCode
+- **Payment Info:** CardName, CardNumber, Expiration, CVV, PaymentMethod
+- `UserName` → Checkout edilecek sepetin kullanıcı adı
+- `IRequest<bool>` → Başarılı/başarısız döner
+
+### CheckoutBasketValidator.cs
+
+**Dosya:** `Features/Basket/Commands/CheckoutBasket/CheckoutBasketValidator.cs`
+
+**Ne işe yarar:** CheckoutBasketCommand için validation kuralları
+
+**Validation Kuralları:**
+- `UserName` → NotEmpty
+- `EmailAddress` → NotEmpty + EmailAddress format kontrolü
+- `AddressLine` → NotEmpty
+- `CardNumber` → NotEmpty + Length(16)
+- `CVV` → NotEmpty + Length(3)
+
+### CheckoutBasketHandler.cs
+
+**Dosya:** `Features/Basket/Commands/CheckoutBasket/CheckoutBasketHandler.cs`
+
+**Ne işe yarar:** CheckoutBasketCommand'yi işler (RabbitMQ'ya event gönderir, sepeti siler)
+
+**Dependencies:**
+- `IBasketRepository` → Sepeti almak ve silmek için
+- `IPublishEndpoint` → RabbitMQ'ya event göndermek için (MassTransit)
+- `IMapper` → Command'den Event'e map etmek için
+- `ILogger` → Loglama için
+
+**Adım adım ne yapıyor?**
+
+1. **Sepeti Redis'ten al**
+   ```csharp
+   var basket = await _repository.GetBasket(request.UserName);
+   ```
+   - Sepet yoksa → `false` döner (hata fırlatmaz)
+
+2. **Event oluştur**
+   ```csharp
+   var eventMessage = _mapper.Map<BasketCheckoutEvent>(request);
+   eventMessage = eventMessage with { TotalPrice = basket.TotalPrice };
+   ```
+   - Command'den Event'e map eder
+   - `TotalPrice`'ı basket'ten alır (record with expression)
+
+3. **RabbitMQ'ya gönder**
+   ```csharp
+   await _publishEndpoint.Publish(eventMessage, cancellationToken);
+   ```
+   - Asenkron event gönderir (fire & forget)
+   - Ordering Service dinleyecek
+
+4. **Sepeti sil**
+   ```csharp
+   await _repository.DeleteBasket(request.UserName);
+   ```
+   - Checkout sonrası sepet temizlenir
+
+**Önemli Noktalar:**
+- `IPublishEndpoint` → MassTransit ile event publish
+- Event mapping → Command'den Event'e AutoMapper ile
+- TotalPrice → Basket'ten alınır (command'de yok)
+- Sepet silinir → Checkout sonrası sepet temizlenir
+
+**Sonuç:**
+- `Features/Basket/Commands/CheckoutBasket/CheckoutBasketCommand.cs` oluşturuldu
+- `Features/Basket/Commands/CheckoutBasket/CheckoutBasketHandler.cs` oluşturuldu
+- `Features/Basket/Commands/CheckoutBasket/CheckoutBasketValidator.cs` oluşturuldu
+
+---
+
+## Adım 8: MassTransit Konfigürasyonu
+
+**Dosya:** `Program.cs`
+
+**Kod:**
+```csharp
+using MassTransit;
+
+// MassTransit
+builder.Services.AddMassTransit(config =>
+{
+    config.UsingRabbitMq((context, cfg) =>
+    {
+        cfg.Host(builder.Configuration["MessageBroker:Host"], "/", h =>
+        {
+            h.Username("guest");
+            h.Password("guest");
+        });
+    });
+});
+```
+
+**Açıklamalar:**
+
+### AddMassTransit Nedir?
+
+**AddMassTransit** = MassTransit'i DI container'a kaydeder
+
+**Ne yapıyor?**
+- `IBusControl` → RabbitMQ bağlantısını yönetir (Singleton)
+- `IPublishEndpoint` → Event publish için (Scoped)
+- `ISendEndpointProvider` → Message send için (Scoped)
+
+### UsingRabbitMq Nedir?
+
+**UsingRabbitMq** = RabbitMQ provider'ını seçer
+
+**Ne yapıyor?**
+- RabbitMQ bağlantısını yapılandırır
+- Connection string'i parse eder
+- Bağlantıyı yönetir
+
+### Host Konfigürasyonu
+
+**cfg.Host(...)**
+- **Connection String:** `appsettings.json`'dan `MessageBroker:Host` okunur
+- **VHost:** `/` (default virtual host)
+- **Username/Password:** `guest/guest` (default RabbitMQ credentials)
+
+**Connection String Format:**
+```
+amqp://guest:guest@localhost:5673
+```
+
+### DI Container'da Ne Oluyor?
+
+```csharp
+// MassTransit şunları kaydeder:
+- IBusControl → RabbitMqBusControl (Singleton) - RabbitMQ bağlantısını yönetir
+- IPublishEndpoint → PublishEndpoint (Scoped) - Event publish için
+- ISendEndpointProvider → SendEndpointProvider (Scoped) - Message send için
+```
+
+### RabbitMQ Bağlantı Akışı
+
+```
+Uygulama Başlatılıyor
+    ↓
+AddMassTransit() çağrılır
+    ↓
+IBusControl oluşturulur (Singleton)
+    ↓
+RabbitMQ'ya bağlanır (amqp://guest:guest@localhost:5673)
+    ↓
+Connection açılır (TCP socket)
+    ↓
+Uygulama çalışırken bağlantı açık kalır
+    ↓
+IPublishEndpoint.Publish() → RabbitMQ'ya mesaj gönderir
+    ↓
+Uygulama kapanınca → Bağlantı kapanır
+```
+
+### Neden Singleton?
+
+**IBusControl Singleton olarak kaydedilir**
+
+**Neden?**
+- RabbitMQ bağlantısı pahalı (TCP socket)
+- Tüm request'ler aynı bağlantıyı kullanabilir
+- Thread-safe
+- Connection pooling yapar
+
+**Sonuç:**
+- MassTransit konfigürasyonu tamamlandı
+- RabbitMQ bağlantısı hazır
+- Event publish/subscribe için hazır
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Basket/Basket.API/Basket.API.csproj
+# Build başarılı olmalı (0 hata, 0 uyarı)
+```
+
+---
+
+## Faz 5.4 Özet
+
+### Tamamlanan Adımlar:
+1. ✅ MediatR, FluentValidation, AutoMapper konfigürasyonu
+2. ✅ DTO'lar oluşturuldu (`ShoppingCartDto`, `ShoppingCartItemDto`)
+3. ✅ AutoMapper Profile oluşturuldu (`MappingProfile.cs`)
+4. ✅ GetBasketQuery + GetBasketHandler oluşturuldu
+5. ✅ StoreBasketCommand + StoreBasketHandler + StoreBasketValidator oluşturuldu
+6. ✅ DeleteBasketCommand + DeleteBasketHandler oluşturuldu
+7. ✅ CheckoutBasketCommand + CheckoutBasketHandler + CheckoutBasketValidator oluşturuldu
+8. ✅ MassTransit konfigürasyonu eklendi
+
+### Oluşturulan Klasör ve Dosyalar:
+
+#### Dtos/
+- **ShoppingCartDto.cs** → Sepet DTO (API response için)
+- **ShoppingCartItemDto.cs** → Sepet item DTO (API response için)
+
+#### Mapping/
+- **MappingProfile.cs** → Entity ↔ DTO ve Command ↔ Event mapping'leri
+
+#### Features/Basket/Queries/GetBasket/
+- **GetBasketQuery.cs** → Sepeti getirmek için query
+- **GetBasketHandler.cs** → GetBasketQuery'yi işler (Redis + gRPC indirim)
+
+#### Features/Basket/Commands/StoreBasket/
+- **StoreBasketCommand.cs** → Sepeti kaydetmek için command
+- **StoreBasketHandler.cs** → StoreBasketCommand'yi işler (Redis'e kaydet)
+- **StoreBasketValidator.cs** → StoreBasketCommand validation kuralları
+
+#### Features/Basket/Commands/DeleteBasket/
+- **DeleteBasketCommand.cs** → Sepeti silmek için command
+- **DeleteBasketHandler.cs** → DeleteBasketCommand'yi işler (Redis'ten sil)
+
+#### Features/Basket/Commands/CheckoutBasket/
+- **CheckoutBasketCommand.cs** → Sepeti checkout etmek için command
+- **CheckoutBasketHandler.cs** → CheckoutBasketCommand'yi işler (RabbitMQ event + sepet sil)
+- **CheckoutBasketValidator.cs** → CheckoutBasketCommand validation kuralları
+
+### Önemli Kavramlar:
+
+#### MediatR:
+- **Pipeline Behavior:** LoggingBehavior, ValidationBehavior
+- **Handler Registration:** Otomatik (RegisterServicesFromAssembly)
+- **Request/Response:** IRequest<TResponse>, IRequestHandler<TRequest, TResponse>
+
+#### FluentValidation:
+- **Validator Registration:** Otomatik (AddValidatorsFromAssembly)
+- **Validation Behavior:** Pipeline'da otomatik çalışır
+- **Error Handling:** ValidationException fırlatır
+
+#### AutoMapper:
+- **Profile Registration:** Otomatik (AddAutoMapper)
+- **Mapping Types:** Entity ↔ DTO, Command → Event
+- **Ignore Members:** Manuel hesaplanacak property'ler ignore edilir
+
+#### MassTransit:
+- **IBusControl:** RabbitMQ bağlantısını yönetir (Singleton)
+- **IPublishEndpoint:** Event publish için (Scoped)
+- **Connection:** RabbitMQ'ya otomatik bağlanır
+
+---
+
+## Faz 5.5: Basket Controller & Entegrasyon
+
+**Hedef:** REST API endpoint'leri ve entegrasyon
+
+### Controller Pattern Nedir?
+
+**Controller** = HTTP request'leri karşılayan ve response dönen class'lar
+
+**Ne işe yarar?**
+- REST API endpoint'lerini tanımlar
+- HTTP metodlarını (GET, POST, DELETE) map eder
+- MediatR'a command/query gönderir
+- Response döner
+
+**Neden Controller?**
+- ASP.NET Core'un standart pattern'i
+- Route'ları organize eder
+- Swagger dokümantasyonu otomatik oluşur
+
+---
+
+## Adım 1: BasketsController Oluştur
+
+**Dosya:** `Controllers/BasketsController.cs`
+
+**Ne işe yarar:** REST API endpoint'lerini oluşturur (MediatR ile)
+
+**Kod:**
+```csharp
+using Basket.API.Dtos;
+using Basket.API.Features.Basket.Commands.CheckoutBasket;
+using Basket.API.Features.Basket.Commands.DeleteBasket;
+using Basket.API.Features.Basket.Commands.StoreBasket;
+using Basket.API.Features.Basket.Queries.GetBasket;
+using MediatR;
+using Microsoft.AspNetCore.Mvc;
+
+namespace Basket.API.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+public class BasketsController : ControllerBase
+{
+    private readonly IMediator _mediator;
+
+    public BasketsController(IMediator mediator)
+    {
+        _mediator = mediator;
+    }
+
+    // ... endpoint'ler
+}
+```
+
+**Açıklamalar:**
+
+### ApiController Attribute
+
+**`[ApiController]`** = API Controller olduğunu belirtir
+
+**Ne işe yarar?**
+- Automatic model validation (otomatik model doğrulama)
+- ProblemDetails response formatı
+- 400 Bad Request otomatik döner (validation hatası varsa)
+
+### Route Attribute
+
+**`[Route("api/[controller]")]`** = Route pattern tanımlar
+
+**Ne demek?**
+- `[controller]` → Controller adı (BasketsController → "Baskets")
+- Base route: `/api/baskets`
+- Her metod kendi route'unu ekler
+
+**Örnek:**
+- `[HttpGet("{userName}")]` → `/api/baskets/{userName}`
+- `[HttpPost]` → `/api/baskets`
+- `[HttpPost("checkout")]` → `/api/baskets/checkout`
+
+### IMediator Dependency
+
+**`IMediator`** = MediatR mediator interface'i
+
+**Ne işe yarar?**
+- Command/Query'leri handler'lara gönderir
+- Pipeline'ı çalıştırır (Logging, Validation)
+- Response döner
+
+**Neden Controller'da IMediator?**
+- Controller direkt handler'a bağlı değil
+- MediatR pattern kullanılıyor
+- Decoupling (Controller, Handler'ı bilmez)
+
+### Endpoint'ler
+
+#### 1. GetBasket Endpoint
+
+**`[HttpGet("{userName}")]`**
+
+**Ne yapar:**
+- `GET /api/baskets/{userName}` → Sepeti getirir
+- `GetBasketQuery` oluşturur ve MediatR'a gönderir
+- `ShoppingCartDto` döner
+
+**Response:**
+- `200 OK` → Sepet bulundu
+- `200 OK` (boş sepet) → Sepet yoksa boş sepet döner
+
+**Kod:**
+```csharp
+[HttpGet("{userName}")]
+[ProducesResponseType(typeof(ShoppingCartDto), StatusCodes.Status200OK)]
+public async Task<ActionResult<ShoppingCartDto>> GetBasket(string userName)
+{
+    var basket = await _mediator.Send(new GetBasketQuery(userName));
+    return Ok(basket);
+}
+```
+
+#### 2. StoreBasket Endpoint
+
+**`[HttpPost]`**
+
+**Ne yapar:**
+- `POST /api/baskets` → Sepeti kaydeder/günceller
+- Request body'den `ShoppingCartDto` alır
+- `StoreBasketCommand` oluşturur ve MediatR'a gönderir
+- `ShoppingCartDto` döner
+
+**Response:**
+- `200 OK` → Sepet kaydedildi/güncellendi
+- `400 Bad Request` → Validation hatası (FluentValidation)
+
+**Kod:**
+```csharp
+[HttpPost]
+[ProducesResponseType(typeof(ShoppingCartDto), StatusCodes.Status200OK)]
+public async Task<ActionResult<ShoppingCartDto>> StoreBasket([FromBody] ShoppingCartDto basket)
+{
+    var result = await _mediator.Send(new StoreBasketCommand(basket));
+    return Ok(result);
+}
+```
+
+#### 3. DeleteBasket Endpoint
+
+**`[HttpDelete("{userName}")]`**
+
+**Ne yapar:**
+- `DELETE /api/baskets/{userName}` → Sepeti siler
+- `DeleteBasketCommand` oluşturur ve MediatR'a gönderir
+- `bool` döner (başarılı/başarısız)
+
+**Response:**
+- `204 No Content` → Sepet silindi
+- `404 Not Found` → Sepet bulunamadı
+
+**Kod:**
+```csharp
+[HttpDelete("{userName}")]
+[ProducesResponseType(StatusCodes.Status204NoContent)]
+public async Task<IActionResult> DeleteBasket(string userName)
+{
+    var deleted = await _mediator.Send(new DeleteBasketCommand(userName));
+    if (!deleted)
+        return NotFound();
+    
+    return NoContent();
+}
+```
+
+#### 4. CheckoutBasket Endpoint
+
+**`[HttpPost("checkout")]`**
+
+**Ne yapar:**
+- `POST /api/baskets/checkout` → Checkout yapar (RabbitMQ event)
+- Request body'den `CheckoutBasketCommand` alır
+- MediatR'a gönderir
+- `bool` döner (başarılı/başarısız)
+
+**Response:**
+- `200 OK` → Checkout başarılı
+- `400 Bad Request` → Sepet bulunamadı veya validation hatası
+
+**Kod:**
+```csharp
+[HttpPost("checkout")]
+[ProducesResponseType(StatusCodes.Status200OK)]
+[ProducesResponseType(StatusCodes.Status400BadRequest)]
+public async Task<ActionResult<bool>> CheckoutBasket([FromBody] CheckoutBasketCommand command)
+{
+    var result = await _mediator.Send(command);
+    if (!result)
+        return BadRequest("Basket not found");
+    
+    return Ok(result);
+}
+```
+
+### ProducesResponseType Attribute
+
+**`[ProducesResponseType]`** = Swagger dokümantasyonu için response tiplerini belirtir
+
+**Ne işe yarar?**
+- Swagger UI'da response tipleri gösterilir
+- API dokümantasyonu otomatik oluşur
+- Client'lar için bilgi sağlar
+
+**Örnek:**
+```csharp
+[ProducesResponseType(typeof(ShoppingCartDto), StatusCodes.Status200OK)]
+```
+- Swagger'da: `200 OK` → `ShoppingCartDto` döner
+
+### Request/Response Akışı
+
+```
+HTTP Request: GET /api/baskets/user1
+    ↓
+BasketsController.GetBasket("user1")
+    ↓
+_mediator.Send(new GetBasketQuery("user1"))
+    ↓
+MediatR Pipeline:
+  - LoggingBehavior
+  - ValidationBehavior
+  - GetBasketHandler.Handle()
+    ↓
+Response: ShoppingCartDto
+    ↓
+HTTP Response: 200 OK + JSON
+```
+
+**Sonuç:**
+- `Controllers/BasketsController.cs` oluşturuldu
+- 4 endpoint eklendi: GetBasket, StoreBasket, DeleteBasket, CheckoutBasket
+- MediatR entegrasyonu tamamlandı
+
+---
+
+## Adım 2: Exception Handler Middleware Ekle
+
+**Dosya:** `Program.cs`
+
+**Ne işe yarar:** Global exception handling ekler
+
+**Kod:**
+```csharp
+using BuildingBlocks.Exceptions.Handler;
+
+// Exception Handler
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
+
+// ...
+
+var app = builder.Build();
+
+// Exception Handler Middleware
+app.UseExceptionHandler();
+```
+
+**Açıklamalar:**
+
+### AddExceptionHandler Nedir?
+
+**`AddExceptionHandler<GlobalExceptionHandler>()`** = Exception handler'ı DI container'a kaydeder
+
+**Ne yapar?**
+- `GlobalExceptionHandler` class'ını kaydeder
+- Exception'ları yakalamak için hazırlar
+
+### AddProblemDetails Nedir?
+
+**`AddProblemDetails()`** = ProblemDetails servisini ekler
+
+**Ne işe yarar?**
+- RFC 7807 formatında hata response'ları
+- Standart hata formatı (type, title, status, detail)
+
+### UseExceptionHandler Middleware
+
+**`app.UseExceptionHandler()`** = Exception handler middleware'ini ekler
+
+**Ne yapar?**
+- Tüm exception'ları yakalar
+- `GlobalExceptionHandler.TryHandleAsync()` çağrılır
+- ProblemDetails formatında response döner
+
+### GlobalExceptionHandler Nasıl Çalışır?
+
+**Dosya:** `BuildingBlocks.Exceptions/Handler/GlobalExceptionHandler.cs`
+
+**Ne yapar:**
+1. Exception yakalanır
+2. Exception tipine göre ProblemDetails oluşturulur:
+   - `NotFoundException` → 404 Not Found
+   - `BadRequestException` → 400 Bad Request
+   - `InternalServerException` → 500 Internal Server Error
+   - Diğer exception'lar → 500 Internal Server Error
+3. ProblemDetails JSON formatında döner
+
+**Exception Akışı:**
+```
+Handler'da exception fırlatıldı
+    ↓
+MediatR exception'ı yukarı fırlatır
+    ↓
+Controller exception'ı yakalamaz
+    ↓
+UseExceptionHandler middleware yakalar
+    ↓
+GlobalExceptionHandler.TryHandleAsync() çağrılır
+    ↓
+ProblemDetails oluşturulur
+    ↓
+JSON response döner
+```
+
+**Örnek Response:**
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc7807",
+  "title": "Not Found",
+  "status": 404,
+  "detail": "Basket not found for user1",
+  "instance": "/api/baskets/user1"
+}
+```
+
+**Sonuç:**
+- Exception Handler Middleware eklendi
+- Global exception handling aktif
+- ProblemDetails formatında hata response'ları
+
+---
+
+## Adım 3: Health Checks Ekle
+
+**Dosya:** `Program.cs`
+
+**Ne işe yarar:** Redis bağlantısını kontrol eder
+
+**Kod:**
+```csharp
+// Health Checks
+builder.Services.AddHealthChecks()
+    .AddRedis(builder.Configuration.GetConnectionString("Redis")!);
+
+// ...
+
+app.MapHealthChecks("/health");
+```
+
+**Açıklamalar:**
+
+### AddHealthChecks Nedir?
+
+**`AddHealthChecks()`** = Health check servislerini ekler
+
+**Ne yapar?**
+- Health check sistemini yapılandırır
+- Health check provider'ları eklenir
+
+### AddRedis Nedir?
+
+**`AddRedis(...)`** = Redis health check provider'ı ekler
+
+**Ne yapar?**
+- Redis bağlantısını kontrol eder
+- Connection string'i kullanır
+- Redis erişilebilir mi kontrol eder
+
+**Nasıl çalışır?**
+```
+Health Check Request: GET /health
+    ↓
+AddRedis health check çalışır
+    ↓
+Redis'e bağlanmaya çalışır
+    ↓
+Başarılı → Healthy
+Başarısız → Unhealthy
+```
+
+### MapHealthChecks Nedir?
+
+**`app.MapHealthChecks("/health")`** = Health check endpoint'ini oluşturur
+
+**Ne yapar?**
+- `/health` endpoint'ini oluşturur
+- Health check'leri çalıştırır
+- Sonuçları döner
+
+**Response Format:**
+```json
+{
+  "status": "Healthy",
+  "totalDuration": "00:00:00.0123456",
+  "entries": {
+    "Redis": {
+      "status": "Healthy",
+      "duration": "00:00:00.0012345"
+    }
+  }
+}
+```
+
+**Status Değerleri:**
+- `Healthy` → Tüm health check'ler başarılı
+- `Degraded` → Bazı health check'ler başarısız
+- `Unhealthy` → Tüm health check'ler başarısız
+
+**Neden Health Checks?**
+- Monitoring için (Kubernetes, Docker, vb.)
+- Load balancer'lar için (sağlıklı instance'ları seçer)
+- Alerting için (sağlıksız servisleri tespit eder)
+
+**Sonuç:**
+- Health Checks eklendi
+- Redis health check aktif
+- `/health` endpoint'i hazır
+
+---
+
+## Faz 5.5 Özet
+
+### Tamamlanan Adımlar:
+1. ✅ BasketsController oluşturuldu
+2. ✅ Exception Handler Middleware eklendi
+3. ✅ Health Checks eklendi
+
+### Oluşturulan Dosyalar:
+
+#### Controllers/
+- **BasketsController.cs** → REST API endpoint'leri
+  - `GET /api/baskets/{userName}` → GetBasket
+  - `POST /api/baskets` → StoreBasket
+  - `DELETE /api/baskets/{userName}` → DeleteBasket
+  - `POST /api/baskets/checkout` → CheckoutBasket
+
+### Program.cs Güncellemeleri:
+
+#### Exception Handler:
+- `AddExceptionHandler<GlobalExceptionHandler>()` → Exception handler kaydı
+- `AddProblemDetails()` → ProblemDetails servisi
+- `app.UseExceptionHandler()` → Exception middleware
+
+#### Health Checks:
+- `AddHealthChecks().AddRedis(...)` → Redis health check
+- `app.MapHealthChecks("/health")` → Health check endpoint'i
+
+### REST API Endpoint'leri:
+
+| Method | Endpoint | Açıklama | Response |
+|--------|----------|----------|----------|
+| GET | `/api/baskets/{userName}` | Sepeti getirir | `200 OK` + ShoppingCartDto |
+| POST | `/api/baskets` | Sepeti kaydeder/günceller | `200 OK` + ShoppingCartDto |
+| DELETE | `/api/baskets/{userName}` | Sepeti siler | `204 No Content` veya `404 Not Found` |
+| POST | `/api/baskets/checkout` | Checkout yapar | `200 OK` veya `400 Bad Request` |
+
+### Önemli Kavramlar:
+
+#### Controller Pattern:
+- **ApiController:** Automatic model validation
+- **Route:** Endpoint pattern tanımlama
+- **IMediator:** MediatR entegrasyonu
+- **ProducesResponseType:** Swagger dokümantasyonu
+
+#### Exception Handling:
+- **GlobalExceptionHandler:** Tüm exception'ları yakalar
+- **ProblemDetails:** RFC 7807 formatında hata response'ları
+- **UseExceptionHandler:** Exception middleware
+
+#### Health Checks:
+- **AddHealthChecks:** Health check sistemi
+- **AddRedis:** Redis bağlantı kontrolü
+- **MapHealthChecks:** Health check endpoint'i
+
+---
+
+## Faz 5 Tamamlandı - Genel Özet
+
+### Tamamlanan Tüm Fazlar:
+1. ✅ Faz 5.1: Basket.API Projesi Oluştur
+2. ✅ Faz 5.2: Basket Redis Repository
+3. ✅ Faz 5.3: Basket gRPC Client (Discount)
+4. ✅ Faz 5.4: Basket CQRS (Commands & Queries)
+5. ✅ Faz 5.5: Basket Controller & Entegrasyon
+
+### Basket Service Özellikleri:
+
+#### Teknolojiler:
+- **Redis:** Sepet verilerini saklar (in-memory, hızlı)
+- **gRPC:** Discount Service'e bağlanır (hızlı, binary)
+- **RabbitMQ:** Checkout event'lerini gönderir (async)
+- **MediatR:** CQRS pattern implementasyonu
+- **FluentValidation:** Request validation
+- **AutoMapper:** Object mapping
+
+#### Endpoint'ler:
+- `GET /api/baskets/{userName}` → Sepeti getirir (indirim hesaplar)
+- `POST /api/baskets` → Sepeti kaydeder/günceller
+- `DELETE /api/baskets/{userName}` → Sepeti siler
+- `POST /api/baskets/checkout` → Checkout yapar (RabbitMQ event)
+
+#### Özellikler:
+- ✅ Sepet CRUD işlemleri
+- ✅ İndirim hesaplama (gRPC ile)
+- ✅ Checkout işlemi (RabbitMQ event)
+- ✅ Global exception handling
+- ✅ Health checks (Redis)
+- ✅ Swagger dokümantasyonu
 
 ---
 
 **Tarih:** Aralık 2024  
-**Faz:** Faz 5.1, 5.2 & 5.3 - Basket.API Projesi, Redis Repository ve gRPC Client  
+**Faz:** Faz 5.1, 5.2, 5.3, 5.4 & 5.5 - Basket.API Projesi, Redis Repository, gRPC Client, CQRS ve Controller  
 **Durum:** ✅ Tamamlandı
 
