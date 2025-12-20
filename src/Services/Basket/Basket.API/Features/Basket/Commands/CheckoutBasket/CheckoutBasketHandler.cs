@@ -60,11 +60,9 @@ public class CheckoutBasketHandler : IRequestHandler<CheckoutBasketCommand, bool
         var eventMessage = _mapper.Map<BasketCheckoutEvent>(request);
         eventMessage = eventMessage with { TotalPrice = basket.TotalPrice }; // Sepetten toplam fiyatı ekle
 
-        // ADIM 3: Event'i RabbitMQ'ya gönder
+        // ADIM 3: Event'i RabbitMQ'ya gönder Order servisi için
         // RabbitMQ bir message broker'dır (mesaj kuyruğu)
-        // Ordering Service bu event'i dinler ve sipariş oluşturur
-        // Bu sayede Basket Service ve Ordering Service birbirinden bağımsız çalışır (loosely coupled)
-        await _publishEndpoint.Publish(eventMessage, cancellationToken);
+      await _publishEndpoint.Publish(eventMessage, cancellationToken);
 
         _logger.LogInformation("BasketCheckoutEvent published for {UserName}. TotalPrice: {TotalPrice}",
             request.UserName, eventMessage.TotalPrice);
