@@ -85,65 +85,79 @@ public class BasketRepository : IBasketRepository
     /// </summary>
     public async Task<ShoppingCart> SaveBasket(ShoppingCart basket)
     {
-        // 1. PostgreSQL'e yaz (source of truth)
+        // 1. PostgreSQL'de kullanıcının mevcut sepetini kontrol et
+        //    Varsa existing'e yüklenir, yoksa null döner
         var existing = await _context.ShoppingCarts
             .Include(x => x.Items)
             .FirstOrDefaultAsync(x => x.UserName == basket.UserName);
 
+        // 2. YENİ SEPET İSE: ID'ler atanıp PostgreSQL'e eklenir
         if (existing == null)
         {
+            // Sepet ve item'lara benzersiz ID'ler ata
             basket.Id = Guid.NewGuid();
             basket.Items.ForEach(item => item.Id = Guid.NewGuid());
+            // Yeni sepeti EF Core'a ekle (henüz DB'ye yazılmadı)
             _context.ShoppingCarts.Add(basket);
         }
+        // 3. MEVCUT SEPET İSE: Eski item'lar silinir, yeni item'lar eklenir
         else
         {
-            // Mevcut item'ları sil (ExecuteDelete - direkt SQL DELETE, tracking sorunu yok)
+            // Eski item'ları PostgreSQL'den direkt sil (ExecuteDeleteAsync tracking yapmaz)
             await _context.ShoppingCartItems
                 .Where(x => x.ShoppingCartId == existing.Id)
                 .ExecuteDeleteAsync();
             
-            // Yeni item'ları ekle (AutoMapper kullan - DRY prensibi, maintenance kolay)
+            // Kullanıcıdan gelen yeni item'ları entity'ye çevir ve hazırla
             var newItems = basket.Items.Select(item =>
             {
                 var entity = _mapper.Map<ShoppingCartItem>(item);
                 entity.Id = Guid.NewGuid();
-                entity.ShoppingCartId = existing.Id;
+                entity.ShoppingCartId = existing.Id; // Mevcut sepete bağla
                 return entity;
             }).ToList();
             
+            // Yeni item'ları EF Core'a ekle (henüz DB'ye yazılmadı)
             _context.ShoppingCartItems.AddRange(newItems);
         }
 
+        // 4. Tüm değişiklikleri PostgreSQL'e kaydet (INSERT veya DELETE+INSERT)
         await _context.SaveChangesAsync();
 
-        // 2. SaveChanges sonrası güncel basket'i yükle (Items için - ExecuteDeleteAsync tracking yapmadığı için)
-        // Sadece 1 kez yükle, hem Redis hem return için kullan (performans + güvenlik)
+        // 5. savedBasket'e güncel veriyi ata (Redis'e yazmak ve döndürmek için)
         ShoppingCart savedBasket;
         if (existing != null)
         {
-            // Mevcut basket güncellendi - ExecuteDeleteAsync tracking yapmadığı için reload gerekli
+            // MEVCUT SEPET GÜNCELLENDİYSE:
+            // ExecuteDeleteAsync tracking yapmadığı için existing.Items eski veriyi içeriyor
+            // Bu yüzden PostgreSQL'den güncel veriyi çek (reload)
+            // Eğer reload null dönerse existing'i kullan (fallback)
             savedBasket = await ReloadBasketWithItems(existing.Id) ?? existing;
         }
         else
         {
-            // Yeni basket - SaveChanges sonrası ID'ler set edildi, basket zaten doğru (reload gerekmez)
+            // YENİ SEPET OLUŞTURULDUYSA:
+            // basket zaten doğru (ID'ler atandı, PostgreSQL'e yazıldı)
+            // Reload gerekmez, direkt basket'i kullan
             savedBasket = basket;
         }
 
-        // 3. Redis'e yaz (cache)
+        // 6. savedBasket'i Redis cache'e yaz (performans için)
         try
         {
+            // Basket'i JSON string'e çevir
             var json = JsonSerializer.Serialize(savedBasket);
+            // Redis'e kaydet (key: "basket:username", expiration: 24 saat)
             await _redis.StringSetAsync(GetRedisKey(basket.UserName), json, CacheExpiration);
             _logger.LogInformation("Basket saved to database and cached for {UserName}", basket.UserName);
         }
         catch (RedisConnectionException ex)
         {
-            // Redis down olursa sadece log'la, PostgreSQL'e yazıldı zaten
+            // Redis down olsa bile devam et (PostgreSQL'e yazıldı zaten - source of truth)
             _logger.LogWarning(ex, "Redis unavailable, basket saved to database only for {UserName}", basket.UserName);
         }
 
+        // 7. savedBasket'i döndür (API response olarak)
         return savedBasket;
     }
 
