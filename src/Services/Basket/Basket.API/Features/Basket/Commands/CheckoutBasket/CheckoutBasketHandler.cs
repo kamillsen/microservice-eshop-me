@@ -3,6 +3,7 @@ using Basket.API.Data;
 using BuildingBlocks.Messaging.Events;
 using MassTransit;
 using MediatR;
+using BasketCheckoutItem = BuildingBlocks.Messaging.Events.BasketCheckoutItem;
 
 namespace Basket.API.Features.Basket.Commands.CheckoutBasket;
 
@@ -46,33 +47,37 @@ public class CheckoutBasketHandler : IRequestHandler<CheckoutBasketCommand, bool
 
     public async Task<bool> Handle(CheckoutBasketCommand request, CancellationToken cancellationToken)
     {
-        // ADIM 1: Sepeti Redis'ten al (cache'den hızlı okuma)
-        // Redis'te yoksa PostgreSQL'den alır
         var basket = await _repository.GetBasket(request.UserName);
         if (basket == null)
         {
             _logger.LogWarning("Basket not found for {UserName}", request.UserName);
-            return false; // Sepet yoksa checkout yapılamaz
+            return false;
         }
 
-        // ADIM 2: BasketCheckoutEvent oluştur
-        // Bu event, Ordering Service'in sipariş oluşturması için gerekli tüm bilgileri içerir
+        if (basket.Items == null || basket.Items.Count == 0)
+        {
+            _logger.LogWarning("Basket has no items for {UserName}", request.UserName);
+            return false;
+        }
+
         var eventMessage = _mapper.Map<BasketCheckoutEvent>(request);
-        eventMessage = eventMessage with { TotalPrice = basket.TotalPrice }; // Sepetten toplam fiyatı ekle
+        var items = _mapper.Map<List<BasketCheckoutItem>>(basket.Items);
 
-        // ADIM 3: Event'i RabbitMQ'ya gönder Order servisi için
-        // RabbitMQ bir message broker'dır (mesaj kuyruğu)
-      await _publishEndpoint.Publish(eventMessage, cancellationToken);
+        eventMessage = eventMessage with
+        {
+            TotalPrice = basket.TotalPrice,
+            Items = items
+        };
 
-        _logger.LogInformation("BasketCheckoutEvent published for {UserName}. TotalPrice: {TotalPrice}",
-            request.UserName, eventMessage.TotalPrice);
+        await _publishEndpoint.Publish(eventMessage, cancellationToken);
 
-        // ADIM 4: Sepeti sil
-        // Checkout tamamlandığı için sepet artık gerekli değil
-        // Hem Redis'ten hem PostgreSQL'den silinir
+        _logger.LogInformation(
+            "BasketCheckoutEvent published for {UserName}. TotalPrice: {TotalPrice}, ItemCount: {ItemCount}",
+            request.UserName, eventMessage.TotalPrice, eventMessage.Items.Count);
+
         await _repository.DeleteBasket(request.UserName);
 
-        return true; // Checkout başarılı
+        return true;
     }
 }
 

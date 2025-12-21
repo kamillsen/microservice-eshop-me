@@ -10,22 +10,18 @@ public class MappingProfile : Profile
 {
     public MappingProfile()
     {
-        // ShoppingCart -> ShoppingCartDto
         CreateMap<ShoppingCart, ShoppingCartDto>()
-            .ForMember(dest => dest.Discount, opt => opt.Ignore()); // Discount manuel hesaplanacak
+            .ForMember(dest => dest.Discount, opt => opt.Ignore());
 
-        // ShoppingCartDto -> ShoppingCart (Reverse mapping)
         CreateMap<ShoppingCartDto, ShoppingCart>();
 
-        // ShoppingCartItem -> ShoppingCartItemDto
-        CreateMap<ShoppingCartItem, ShoppingCartItemDto>();
+        CreateMap<ShoppingCartItem, ShoppingCartItemDto>().ReverseMap();
 
-        // ShoppingCartItemDto -> ShoppingCartItem (Reverse mapping)
-        CreateMap<ShoppingCartItemDto, ShoppingCartItem>();
+        CreateMap<ShoppingCartItem, BasketCheckoutItem>();
 
-        // Command → Event
         CreateMap<CheckoutBasketCommand, BasketCheckoutEvent>()
-            .ForMember(dest => dest.TotalPrice, opt => opt.Ignore()); // TotalPrice basket'ten alınacak
+            .ForMember(dest => dest.TotalPrice, opt => opt.Ignore())
+            .ForMember(dest => dest.Items, opt => opt.Ignore());
     }
 }
 
