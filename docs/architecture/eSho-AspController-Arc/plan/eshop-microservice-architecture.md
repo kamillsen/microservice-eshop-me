@@ -1903,7 +1903,7 @@ healthcheck:
 |--------|---------------|---------------|----------|
 | **Gateway.API** | 8080 | 5000 | Ana giriş noktası |
 | **Catalog.API** | 8080 | 5001 | Ürün servisi |
-| **Basket.API** | 8080 | 5002 | Sepet servisi |
+| **Basket.API** | 8080 | 5278 | Sepet servisi (launchSettings.json'da 5278) |
 | **Ordering.API** | 8080 | 5003 | Sipariş servisi |
 | **Discount.Grpc** | 8080 | 5004 | İndirim servisi (gRPC) |
 
@@ -1925,7 +1925,7 @@ healthcheck:
 | **RedisInsight** | http://localhost:8001 | - |
 | **pgAdmin** | http://localhost:5050 | admin@admin.com / admin |
 | **Swagger (Catalog)** | http://localhost:5001/ | - |
-| **Swagger (Basket)** | http://localhost:5002/swagger | - |
+| **Swagger (Basket)** | http://localhost:5278/swagger | - |
 | **Swagger (Ordering)** | http://localhost:5003/swagger | - |
 | **Gateway** | http://localhost:5000 | - |
 

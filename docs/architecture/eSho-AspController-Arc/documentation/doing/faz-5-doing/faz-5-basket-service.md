@@ -1373,16 +1373,16 @@ if (app.Environment.IsDevelopment())
 ```
 
 ### Test:
-- Swagger açılıyor mu? (http://localhost:5002/swagger)
+- Swagger açılıyor mu? (http://localhost:5278/swagger)
 - Endpoint'ler çalışıyor mu?
   - `GET /api/baskets/user1` → Sepeti getirir
   - `POST /api/baskets` → Sepeti kaydeder
   - `DELETE /api/baskets/user1` → Sepeti siler
   - `POST /api/baskets/checkout` → Checkout yapar
-- Health check çalışıyor mu? (http://localhost:5002/health)
+- Health check çalışıyor mu? (http://localhost:5278/health)
 - Checkout event RabbitMQ'ya gidiyor mu? (RabbitMQ Management UI'da kontrol et)
 
-**Sonuç:** ✅ Basket Service çalışıyor (Port 5002)
+**Sonuç:** ✅ Basket Service çalışıyor (Port 5278 - launchSettings.json'da tanımlı)
 
 ---
 

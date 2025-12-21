@@ -691,11 +691,11 @@ amqp://{username}:{password}@{hostname}:{port}
 - Health checks ekle (Redis + PostgreSQL)
 
 **Test:**
-- Swagger açılıyor mu? (http://localhost:5002/swagger)
+- Swagger açılıyor mu? (http://localhost:5278/swagger)
 - Endpoint'ler çalışıyor mu?
 - Health check çalışıyor mu?
 
-**Sonuç:** ✅ Basket Service çalışıyor (Port 5002)
+**Sonuç:** ✅ Basket Service çalışıyor (Port 5278 - launchSettings.json'da tanımlı)
 
 ---
 
