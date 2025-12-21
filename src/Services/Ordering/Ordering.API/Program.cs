@@ -1,5 +1,9 @@
 using Ordering.API.Data;
 using Microsoft.EntityFrameworkCore;
+using MediatR;
+using BuildingBlocks.Behaviors.Behaviors;
+using FluentValidation;
+using BuildingBlocks.Exceptions.Handler;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,9 +22,27 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
+// MediatR
+builder.Services.AddMediatR(cfg =>
+{
+    cfg.RegisterServicesFromAssembly(typeof(Program).Assembly);
+    cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
+    cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+});
+
+// FluentValidation
+builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
+
+// AutoMapper
+builder.Services.AddAutoMapper(typeof(Program).Assembly);
+
 // PostgreSQL
 builder.Services.AddDbContext<OrderingDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Database")));
+
+// Exception Handler
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
 
 var app = builder.Build();
 
@@ -30,6 +52,9 @@ using (var scope = app.Services.CreateScope())
     var context = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
     await context.Database.MigrateAsync();
 }
+
+// Exception Handler Middleware
+app.UseExceptionHandler();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

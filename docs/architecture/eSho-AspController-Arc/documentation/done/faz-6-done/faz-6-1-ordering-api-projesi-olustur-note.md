@@ -598,3 +598,1190 @@ cat appsettings.json
 **Faz:** Faz 6.1 - Ordering.API Projesi Oluştur  
 **Durum:** ✅ Tamamlandı
 
+---
+
+# Faz 6.2 - Ordering Database & Seed Data Notları
+
+> Bu dosya, Faz 6.2 (Ordering Database & Seed Data) adım adım yaparken öğrendiklerimi not aldığım dosyadır.
+> 
+> **İçerik:**
+> - Adım 1: OrderingDbContext oluştur
+> - Adım 2: Program.cs'de DbContext kaydı
+> - Adım 3: Program.cs'de Migration uygulama kodu
+> - Adım 4: EF Core Migration oluştur
+
+---
+
+## Faz 6.2 Nedir?
+
+**Faz 6.2**, Ordering Service için veritabanı yapısını oluşturur. PostgreSQL'de Orders ve OrderItems tablolarını oluşturmak için EF Core DbContext ve Migration'ları hazırlar.
+
+### Temel İşlevler:
+- **OrderingDbContext** → EF Core DbContext (PostgreSQL bağlantısı)
+- **Entity Configuration** → Order ve OrderItem entity'lerinin veritabanı konfigürasyonu
+- **Migration** → Veritabanı şemasını oluşturan migration dosyaları
+- **Auto Migration** → Uygulama başladığında otomatik migration uygulama
+
+### Neden şimdi?
+- ✅ Entity'ler hazır (Order, OrderItem)
+- ✅ PostgreSQL connection string hazır
+- ✅ Artık veritabanı yapısını oluşturabiliriz
+- ✅ Migration'lar ile veritabanı şeması yönetilebilir
+
+---
+
+## Adım 1: OrderingDbContext Oluştur
+
+**Dosya:** `Data/OrderingDbContext.cs`
+
+**Kod:**
+```csharp
+using Ordering.API.Entities;
+using Microsoft.EntityFrameworkCore;
+
+namespace Ordering.API.Data;
+
+public class OrderingDbContext : DbContext
+{
+    public OrderingDbContext(DbContextOptions<OrderingDbContext> options) : base(options)
+    {
+    }
+
+    public DbSet<Order> Orders { get; set; }
+    public DbSet<OrderItem> OrderItems { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Order>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserName);
+            entity.Property(e => e.Status)
+                .HasConversion<int>(); // Enum'u integer'a çevir
+            entity.HasMany(e => e.Items)
+                .WithOne(e => e.Order)
+                .HasForeignKey(e => e.OrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<OrderItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+        });
+
+        base.OnModelCreating(modelBuilder);
+    }
+}
+```
+
+**Açıklamalar:**
+
+### Order Entity Configuration:
+- `HasKey(e => e.Id)` → Primary key tanımı
+- `HasIndex(e => e.UserName)` → UserName'e göre arama performansı için index
+- `HasConversion<int>()` → OrderStatus enum'u PostgreSQL'de integer olarak saklanır
+- `HasMany(e => e.Items).WithOne(e => e.Order)` → One-to-many ilişki (Order → OrderItems)
+- `OnDelete(DeleteBehavior.Cascade)` → Order silinince OrderItems da otomatik silinir
+
+### OrderItem Entity Configuration:
+- `HasKey(e => e.Id)` → Primary key tanımı
+- Foreign key ilişkisi Order entity konfigürasyonunda tanımlı
+
+**Navigation Property:**
+- `OrderItem.Order` → Navigation property var (gerçek projelerdeki gibi)
+- EF Core'un `Include()` özelliğini kullanmak için gerekli
+- DTO'lar kullanıldığı için döngüsel referans sorunu yok
+
+**Ne işe yarar:**
+- PostgreSQL veritabanı bağlantısını sağlar
+- Entity'lerin veritabanı konfigürasyonunu tanımlar
+- İlişkileri (foreign key, cascade delete) yönetir
+
+**Sonuç:**
+- `Data/OrderingDbContext.cs` dosyası oluşturuldu
+- Order ve OrderItem entity'leri için konfigürasyon yapıldı
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı (0 hata, 0 uyarı)
+```
+
+---
+
+## Adım 2: Program.cs'de DbContext Kaydı
+
+**Dosya:** `Program.cs`
+
+**Eklenen Kod:**
+```csharp
+using Ordering.API.Data;
+using Microsoft.EntityFrameworkCore;
+
+// PostgreSQL
+builder.Services.AddDbContext<OrderingDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Database")));
+```
+
+**Açıklamalar:**
+- `AddDbContext<OrderingDbContext>()` → DbContext'i DI container'a kaydeder
+- `UseNpgsql()` → PostgreSQL provider kullanılır
+- `GetConnectionString("Database")` → `appsettings.json`'dan connection string okunur
+- Scoped lifetime → Her HTTP request için yeni DbContext instance
+
+**Ne işe yarar:**
+- DbContext'i dependency injection ile kullanılabilir hale getirir
+- Handler'larda `OrderingDbContext` inject edilebilir
+- Connection string `appsettings.json`'dan okunur
+
+**Sonuç:**
+- `Program.cs` dosyasına DbContext kaydı eklendi
+- PostgreSQL bağlantısı yapılandırıldı
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı
+```
+
+---
+
+## Adım 3: Program.cs'de Migration Uygulama Kodu
+
+**Dosya:** `Program.cs`
+
+**Eklenen Kod:**
+```csharp
+var app = builder.Build();
+
+// Migration
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+    await context.Database.MigrateAsync();
+}
+```
+
+**Açıklamalar:**
+- `app.Services.CreateScope()` → Service scope oluşturur (DbContext için gerekli)
+- `GetRequiredService<OrderingDbContext>()` → DbContext'i scope'tan alır
+- `MigrateAsync()` → Tüm pending migration'ları otomatik uygular
+- Uygulama başladığında çalışır (container başladığında)
+
+**Ne işe yarar:**
+- Uygulama başladığında migration'ları otomatik uygular
+- Manuel `dotnet ef database update` komutuna gerek kalmaz
+- Container-based deployment için ideal
+
+**Not:** Seed data yok (siparişler kullanıcı işlemleriyle oluşur)
+
+**Sonuç:**
+- `Program.cs` dosyasına migration kodu eklendi
+- Otomatik migration yapılandırıldı
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı
+```
+
+---
+
+## Adım 4: EF Core Migration Oluştur
+
+**Komut:**
+```bash
+cd src/Services/Ordering/Ordering.API
+export DOTNET_ROOT=/usr/lib64/dotnet  # Fedora için (troubleshooting)
+dotnet ef migrations add InitialCreate --output-dir Data/Migrations
+```
+
+**Açıklamalar:**
+- `dotnet ef migrations add` → Yeni migration oluşturur
+- `InitialCreate` → Migration adı (ilk migration)
+- `--output-dir Data/Migrations` → Migration dosyalarının kaydedileceği klasör
+- `export DOTNET_ROOT=/usr/lib64/dotnet` → Fedora için gerekli (dotnet-ef tool sorunu)
+
+**Ne işe yarar:**
+- Veritabanı şemasını oluşturan migration dosyalarını oluşturur
+- Migration dosyaları `Data/Migrations/` klasörüne kaydedilir
+- `MigrateAsync()` ile otomatik uygulanır
+
+**Oluşturulan Dosyalar:**
+- `20251221183640_InitialCreate.cs` → Migration dosyası (Up/Down metodları)
+- `20251221183640_InitialCreate.Designer.cs` → Migration metadata
+- `OrderingDbContextModelSnapshot.cs` → Veritabanı model snapshot
+
+**Migration İçeriği:**
+- `Orders` tablosu:
+  - `Id` (Guid, PK)
+  - `UserName` (string, indexed)
+  - `TotalPrice` (decimal)
+  - `OrderDate` (DateTime)
+  - `Status` (int - enum conversion)
+- `OrderItems` tablosu:
+  - `Id` (Guid, PK)
+  - `OrderId` (Guid, FK → Orders.Id, Cascade Delete)
+  - `ProductId` (Guid)
+  - `ProductName` (string)
+  - `Quantity` (int)
+  - `Price` (decimal)
+
+**Troubleshooting:**
+- **Sorun:** `dotnet-ef tool .NET runtime bulamıyor`
+- **Sebep:** DOTNET_ROOT environment variable yanlış ayarlanmış
+- **Çözüm:** `export DOTNET_ROOT=/usr/lib64/dotnet` (Fedora için)
+- **Detay:** `docs/architecture/eSho-AspController-Arc/documentation/troubleshooting/dotnet-ef-tool-dotnet-runtime-not-found.md`
+
+**Sonuç:**
+- Migration dosyaları oluşturuldu
+- `Data/Migrations/` klasörüne kaydedildi
+
+**Kontrol:**
+```bash
+ls -la src/Services/Ordering/Ordering.API/Data/Migrations/
+# Migration dosyalarını görmeli
+```
+
+---
+
+## Faz 6.2 Özet
+
+### Tamamlanan Adımlar:
+1. ✅ OrderingDbContext oluşturuldu (Order ve OrderItem entity konfigürasyonları)
+2. ✅ Program.cs'de DbContext kaydı yapıldı (PostgreSQL)
+3. ✅ Program.cs'de Migration uygulama kodu eklendi (otomatik migration)
+4. ✅ EF Core Migration oluşturuldu (InitialCreate)
+
+### Kontrol Sonuçları:
+- ✅ Build başarılı (0 hata, 0 uyarı)
+- ✅ DbContext doğru yapılandırıldı
+- ✅ Migration dosyaları oluşturuldu
+- ✅ Navigation property eklendi (gerçek projelerdeki gibi)
+
+### Oluşturulan Dosyalar:
+- `Data/OrderingDbContext.cs` → EF Core DbContext
+- `Data/Migrations/20251221183640_InitialCreate.cs` → Migration dosyası
+- `Data/Migrations/20251221183640_InitialCreate.Designer.cs` → Migration metadata
+- `Data/Migrations/OrderingDbContextModelSnapshot.cs` → Model snapshot
+
+### Önemli Notlar:
+
+#### Navigation Property:
+- `OrderItem.Order` navigation property var (gerçek projelerdeki gibi)
+- EF Core'un `Include()` özelliğini kullanmak için gerekli
+- DTO'lar kullanıldığı için döngüsel referans sorunu yok
+- Catalog.API'deki gibi aynı yaklaşım
+
+#### Cascade Delete:
+- Order silinince OrderItems da otomatik silinir
+- Veri bütünlüğü için önemli
+
+#### Enum Conversion:
+- OrderStatus enum'u PostgreSQL'de integer olarak saklanır
+- `HasConversion<int>()` ile yapılır
+
+---
+
+# Faz 6.3 - Ordering CQRS - Commands & Queries Notları
+
+> Bu dosya, Faz 6.3 (Ordering CQRS - Commands & Queries) adım adım yaparken öğrendiklerimi not aldığım dosyadır.
+> 
+> **İçerik:**
+> - Adım 1: MediatR, FluentValidation, AutoMapper konfigürasyonu
+> - Adım 2: DTO'ları oluştur
+> - Adım 3: AutoMapper MappingProfile oluştur
+> - Adım 4: CreateOrderCommand + Handler + Validator
+> - Adım 5: UpdateOrderCommand + Handler
+> - Adım 6: DeleteOrderCommand + Handler
+> - Adım 7: GetOrdersQuery + Handler
+> - Adım 8: GetOrderByIdQuery + Handler
+> - Adım 9: GetOrdersByUserQuery + Handler
+
+---
+
+## Faz 6.3 Nedir?
+
+**Faz 6.3**, Ordering Service için CQRS pattern'ini uygular. MediatR, FluentValidation ve AutoMapper kullanarak Commands (yazma) ve Queries (okuma) işlemlerini oluşturur.
+
+### Temel İşlevler:
+- **Commands** → Yazma işlemleri (CreateOrder, UpdateOrder, DeleteOrder)
+- **Queries** → Okuma işlemleri (GetOrders, GetOrderById, GetOrdersByUser)
+- **Validation** → FluentValidation ile request doğrulama
+- **Mapping** → AutoMapper ile Entity ↔ DTO mapping
+
+### Neden şimdi?
+- ✅ DbContext hazır
+- ✅ Entity'ler hazır
+- ✅ Artık CQRS pattern'ini uygulayabiliriz
+- ✅ Handler'lar ile business logic'i organize edebiliriz
+
+---
+
+## Adım 1: MediatR, FluentValidation, AutoMapper Konfigürasyonu
+
+**Dosya:** `Program.cs`
+
+**Eklenen Kod:**
+```csharp
+using MediatR;
+using BuildingBlocks.Behaviors.Behaviors;
+using FluentValidation;
+using BuildingBlocks.Exceptions.Handler;
+
+// MediatR
+builder.Services.AddMediatR(cfg =>
+{
+    cfg.RegisterServicesFromAssembly(typeof(Program).Assembly);
+    cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
+    cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+});
+
+// FluentValidation
+builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
+
+// AutoMapper
+builder.Services.AddAutoMapper(typeof(Program).Assembly);
+
+// Exception Handler
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
+```
+
+**Ve middleware:**
+```csharp
+// Exception Handler Middleware
+app.UseExceptionHandler();
+```
+
+**Açıklamalar:**
+
+### MediatR:
+- `RegisterServicesFromAssembly` → Handler'ları otomatik bulur ve kaydeder
+- `AddBehavior<LoggingBehavior>` → Tüm handler'larda otomatik logging
+- `AddBehavior<ValidationBehavior>` → FluentValidation ile otomatik validation
+
+### FluentValidation:
+- `AddValidatorsFromAssembly` → Validator'ları otomatik bulur ve kaydeder
+- ValidationBehavior pipeline'da çalışır
+
+### AutoMapper:
+- `AddAutoMapper` → MappingProfile'ları otomatik bulur ve kaydeder
+- Entity ↔ DTO mapping için
+
+### Exception Handler:
+- `GlobalExceptionHandler` → Tüm exception'ları yakalar ve ProblemDetails döner
+- `UseExceptionHandler()` → Middleware olarak eklenir
+
+**Ne işe yarar:**
+- CQRS pattern için gerekli servisleri kaydeder
+- Pipeline behaviors ile otomatik logging ve validation
+- Exception handling ile merkezi hata yönetimi
+
+**Sonuç:**
+- `Program.cs` dosyasına servis kayıtları eklendi
+- CQRS pattern yapılandırıldı
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı
+```
+
+---
+
+## Adım 2: DTO'ları Oluştur
+
+**Dosyalar:**
+- `Dtos/OrderDto.cs`
+- `Dtos/OrderItemDto.cs`
+
+### OrderDto.cs
+
+**Dosya:** `Dtos/OrderDto.cs`
+
+**Kod:**
+```csharp
+namespace Ordering.API.Dtos;
+
+public class OrderDto
+{
+    public Guid Id { get; set; }
+    public string UserName { get; set; } = default!;
+    public decimal TotalPrice { get; set; }
+    public DateTime OrderDate { get; set; }
+    public string Status { get; set; } = default!;
+    public List<OrderItemDto> Items { get; set; } = new();
+}
+```
+
+**Açıklamalar:**
+- `Status` → string (enum'dan string'e çevrilecek)
+- `Items` → OrderItemDto listesi
+
+**Ne işe yarar:**
+- API response'ları için DTO
+- Entity'ler direkt serialize edilmez (döngüsel referans sorunu olmaz)
+
+### OrderItemDto.cs
+
+**Dosya:** `Dtos/OrderItemDto.cs`
+
+**Kod:**
+```csharp
+namespace Ordering.API.Dtos;
+
+public class OrderItemDto
+{
+    public Guid Id { get; set; }
+    public Guid ProductId { get; set; }
+    public string ProductName { get; set; } = default!;
+    public int Quantity { get; set; }
+    public decimal Price { get; set; }
+}
+```
+
+**Açıklamalar:**
+- OrderItem entity'sinin DTO versiyonu
+- Navigation property yok (Order referansı yok)
+
+**Ne işe yarar:**
+- OrderItem verilerini API'de döndürmek için
+- OrderDto içinde kullanılır
+
+**Sonuç:**
+- `Dtos/OrderDto.cs` oluşturuldu
+- `Dtos/OrderItemDto.cs` oluşturuldu
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı
+```
+
+---
+
+## Adım 3: AutoMapper MappingProfile Oluştur
+
+**Dosya:** `Mapping/MappingProfile.cs`
+
+**Kod:**
+```csharp
+using AutoMapper;
+using Ordering.API.Dtos;
+using Ordering.API.Entities;
+using Ordering.API.Features.Orders.Commands.CreateOrder;
+
+namespace Ordering.API.Mapping;
+
+public class MappingProfile : Profile
+{
+    public MappingProfile()
+    {
+        // Entity ↔ DTO
+        CreateMap<Order, OrderDto>()
+            .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()));
+        CreateMap<OrderItem, OrderItemDto>().ReverseMap();
+
+        // Command → Entity
+        CreateMap<CreateOrderCommand, Order>()
+            .ForMember(dest => dest.Items, opt => opt.Ignore()); // Items manuel eklenir
+
+        CreateMap<OrderItemDto, OrderItem>();
+    }
+}
+```
+
+**Açıklamalar:**
+- `Order.Status` → Enum'u string'e çevirir (DTO'da string)
+- `OrderItem ↔ OrderItemDto` → ReverseMap ile iki yönlü mapping
+- `CreateOrderCommand → Order` → Items ignore edilir (manuel eklenir)
+- `OrderItemDto → OrderItem` → OrderItem mapping
+
+**Not:** `BasketCheckoutEvent → CreateOrderCommand` mapping'i 6.4'te eklenecek (RabbitMQ Consumer)
+
+**Ne işe yarar:**
+- Entity ↔ DTO mapping
+- Command → Entity mapping
+- Enum → string conversion
+
+**Sonuç:**
+- `Mapping/MappingProfile.cs` oluşturuldu
+- Mapping konfigürasyonları yapıldı
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı
+```
+
+---
+
+## Adım 4: CreateOrderCommand + Handler + Validator
+
+### CreateOrderCommand.cs
+
+**Dosya:** `Features/Orders/Commands/CreateOrder/CreateOrderCommand.cs`
+
+**Kod:**
+```csharp
+using MediatR;
+using Ordering.API.Dtos;
+
+namespace Ordering.API.Features.Orders.Commands.CreateOrder;
+
+public record CreateOrderCommand(
+    string UserName,
+    decimal TotalPrice,
+    List<OrderItemDto> Items,
+    string FirstName,
+    string LastName,
+    string EmailAddress,
+    string AddressLine,
+    string Country,
+    string State,
+    string ZipCode,
+    string CardName,
+    string CardNumber,
+    string Expiration,
+    string CVV,
+    int PaymentMethod
+) : IRequest<Guid>;
+```
+
+**Açıklamalar:**
+- `IRequest<Guid>` → MediatR command (OrderId döner)
+- Tüm sipariş bilgileri (UserName, TotalPrice, Items, Address, Payment)
+
+**Ne işe yarar:**
+- Yeni sipariş oluşturmak için command
+- RabbitMQ Consumer'da kullanılacak (6.4'te)
+
+### CreateOrderValidator.cs
+
+**Dosya:** `Features/Orders/Commands/CreateOrder/CreateOrderValidator.cs`
+
+**Kod:**
+```csharp
+using FluentValidation;
+
+namespace Ordering.API.Features.Orders.Commands.CreateOrder;
+
+public class CreateOrderValidator : AbstractValidator<CreateOrderCommand>
+{
+    public CreateOrderValidator()
+    {
+        RuleFor(x => x.UserName)
+            .NotEmpty().WithMessage("UserName boş olamaz");
+
+        RuleFor(x => x.TotalPrice)
+            .GreaterThan(0).WithMessage("TotalPrice 0'dan büyük olmalı");
+
+        RuleFor(x => x.Items)
+            .NotNull().WithMessage("Items null olamaz")
+            .NotEmpty().WithMessage("Items boş olamaz");
+
+        RuleFor(x => x.EmailAddress)
+            .NotEmpty().EmailAddress().WithMessage("Geçerli email adresi gerekli");
+
+        RuleFor(x => x.AddressLine)
+            .NotEmpty().WithMessage("Adres boş olamaz");
+    }
+}
+```
+
+**Açıklamalar:**
+- FluentValidation ile request doğrulama
+- ValidationBehavior pipeline'da otomatik çalışır
+
+**Ne işe yarar:**
+- Geçersiz request'leri yakalar
+- Hata mesajları döner
+
+### CreateOrderHandler.cs
+
+**Dosya:** `Features/Orders/Commands/CreateOrder/CreateOrderHandler.cs`
+
+**Kod:**
+```csharp
+using AutoMapper;
+using MediatR;
+using Ordering.API.Data;
+using Ordering.API.Entities;
+using Ordering.API.Dtos;
+
+namespace Ordering.API.Features.Orders.Commands.CreateOrder;
+
+public class CreateOrderHandler : IRequestHandler<CreateOrderCommand, Guid>
+{
+    private readonly OrderingDbContext _context;
+    private readonly IMapper _mapper;
+    private readonly ILogger<CreateOrderHandler> _logger;
+
+    public CreateOrderHandler(
+        OrderingDbContext context,
+        IMapper mapper,
+        ILogger<CreateOrderHandler> logger)
+    {
+        _context = context;
+        _mapper = mapper;
+        _logger = logger;
+    }
+
+    public async Task<Guid> Handle(CreateOrderCommand request, CancellationToken cancellationToken)
+    {
+        // 1. Command'dan Entity oluştur
+        var order = _mapper.Map<Order>(request);
+        order.Id = Guid.NewGuid();
+        order.OrderDate = DateTime.UtcNow;
+        order.Status = OrderStatus.Pending;
+
+        // 2. OrderItems'ları ekle
+        foreach (var itemDto in request.Items)
+        {
+            var orderItem = _mapper.Map<OrderItem>(itemDto);
+            orderItem.Id = Guid.NewGuid();
+            orderItem.OrderId = order.Id;
+            order.Items.Add(orderItem);
+        }
+
+        // 3. Veritabanına kaydet
+        _context.Orders.Add(order);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Order created. OrderId: {OrderId}, UserName: {UserName}, TotalPrice: {TotalPrice}",
+            order.Id, order.UserName, order.TotalPrice);
+
+        return order.Id;
+    }
+}
+```
+
+**Açıklamalar:**
+- Command'dan Entity oluşturur (AutoMapper)
+- OrderItems'ları manuel ekler (foreach ile)
+- Veritabanına kaydeder
+- Logging yapar
+
+**Ne işe yarar:**
+- Yeni sipariş oluşturur
+- OrderItems'ları ekler
+- OrderId döner
+
+**Sonuç:**
+- `CreateOrderCommand.cs` oluşturuldu
+- `CreateOrderValidator.cs` oluşturuldu
+- `CreateOrderHandler.cs` oluşturuldu
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı
+```
+
+---
+
+## Adım 5: UpdateOrderCommand + Handler
+
+### UpdateOrderCommand.cs
+
+**Dosya:** `Features/Orders/Commands/UpdateOrder/UpdateOrderCommand.cs`
+
+**Kod:**
+```csharp
+using MediatR;
+using Ordering.API.Entities;
+
+namespace Ordering.API.Features.Orders.Commands.UpdateOrder;
+
+public record UpdateOrderCommand(
+    Guid Id,
+    OrderStatus Status
+) : IRequest<bool>;
+```
+
+**Açıklamalar:**
+- Sadece Status güncellenir (Admin için)
+- `IRequest<bool>` → Başarılı/başarısız döner
+
+**Ne işe yarar:**
+- Sipariş durumunu günceller (Pending → Shipped → Delivered)
+
+### UpdateOrderHandler.cs
+
+**Dosya:** `Features/Orders/Commands/UpdateOrder/UpdateOrderHandler.cs`
+
+**Kod:**
+```csharp
+using MediatR;
+using Ordering.API.Data;
+using Ordering.API.Entities;
+
+namespace Ordering.API.Features.Orders.Commands.UpdateOrder;
+
+public class UpdateOrderHandler : IRequestHandler<UpdateOrderCommand, bool>
+{
+    private readonly OrderingDbContext _context;
+    private readonly ILogger<UpdateOrderHandler> _logger;
+
+    public UpdateOrderHandler(
+        OrderingDbContext context,
+        ILogger<UpdateOrderHandler> logger)
+    {
+        _context = context;
+        _logger = logger;
+    }
+
+    public async Task<bool> Handle(UpdateOrderCommand request, CancellationToken cancellationToken)
+    {
+        var order = await _context.Orders.FindAsync(new object[] { request.Id }, cancellationToken);
+        
+        if (order == null)
+        {
+            _logger.LogWarning("Order not found. OrderId: {OrderId}", request.Id);
+            return false;
+        }
+
+        order.Status = request.Status;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Order updated. OrderId: {OrderId}, NewStatus: {Status}",
+            request.Id, request.Status);
+
+        return true;
+    }
+}
+```
+
+**Açıklamalar:**
+- Order'ı bulur
+- Status'u günceller
+- Logging yapar
+
+**Ne işe yarar:**
+- Admin sipariş durumunu günceller
+
+**Sonuç:**
+- `UpdateOrderCommand.cs` oluşturuldu
+- `UpdateOrderHandler.cs` oluşturuldu
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı
+```
+
+---
+
+## Adım 6: DeleteOrderCommand + Handler
+
+### DeleteOrderCommand.cs
+
+**Dosya:** `Features/Orders/Commands/DeleteOrder/DeleteOrderCommand.cs`
+
+**Kod:**
+```csharp
+using MediatR;
+
+namespace Ordering.API.Features.Orders.Commands.DeleteOrder;
+
+public record DeleteOrderCommand(Guid Id) : IRequest<bool>;
+```
+
+**Açıklamalar:**
+- Sipariş ID'si alır
+- `IRequest<bool>` → Başarılı/başarısız döner
+
+**Ne işe yarar:**
+- Siparişi iptal etmek için command
+
+### DeleteOrderHandler.cs
+
+**Dosya:** `Features/Orders/Commands/DeleteOrder/DeleteOrderHandler.cs`
+
+**Kod:**
+```csharp
+using MediatR;
+using Ordering.API.Data;
+using Ordering.API.Entities;
+
+namespace Ordering.API.Features.Orders.Commands.DeleteOrder;
+
+public class DeleteOrderHandler : IRequestHandler<DeleteOrderCommand, bool>
+{
+    private readonly OrderingDbContext _context;
+    private readonly ILogger<DeleteOrderHandler> _logger;
+
+    public DeleteOrderHandler(
+        OrderingDbContext context,
+        ILogger<DeleteOrderHandler> logger)
+    {
+        _context = context;
+        _logger = logger;
+    }
+
+    public async Task<bool> Handle(DeleteOrderCommand request, CancellationToken cancellationToken)
+    {
+        var order = await _context.Orders.FindAsync(new object[] { request.Id }, cancellationToken);
+        
+        if (order == null)
+        {
+            _logger.LogWarning("Order not found. OrderId: {OrderId}", request.Id);
+            return false;
+        }
+
+        // Siparişi silme, sadece iptal et
+        order.Status = OrderStatus.Cancelled;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Order cancelled. OrderId: {OrderId}", request.Id);
+
+        return true;
+    }
+}
+```
+
+**Açıklamalar:**
+- Siparişi silmez, sadece `Cancelled` status'u verir
+- Veri bütünlüğü için (raporlama, analiz)
+
+**Ne işe yarar:**
+- Siparişi iptal eder (soft delete)
+
+**Sonuç:**
+- `DeleteOrderCommand.cs` oluşturuldu
+- `DeleteOrderHandler.cs` oluşturuldu
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı
+```
+
+---
+
+## Adım 7: GetOrdersQuery + Handler
+
+### GetOrdersQuery.cs
+
+**Dosya:** `Features/Orders/Queries/GetOrders/GetOrdersQuery.cs`
+
+**Kod:**
+```csharp
+using MediatR;
+using Ordering.API.Dtos;
+
+namespace Ordering.API.Features.Orders.Queries.GetOrders;
+
+public record GetOrdersQuery : IRequest<IEnumerable<OrderDto>>;
+```
+
+**Açıklamalar:**
+- Parametre yok (tüm siparişler)
+- `IRequest<IEnumerable<OrderDto>>` → OrderDto listesi döner
+
+**Ne işe yarar:**
+- Tüm siparişleri getirir (Admin için)
+
+### GetOrdersHandler.cs
+
+**Dosya:** `Features/Orders/Queries/GetOrders/GetOrdersHandler.cs`
+
+**Kod:**
+```csharp
+using AutoMapper;
+using MediatR;
+using Microsoft.EntityFrameworkCore;
+using Ordering.API.Data;
+using Ordering.API.Dtos;
+
+namespace Ordering.API.Features.Orders.Queries.GetOrders;
+
+public class GetOrdersHandler : IRequestHandler<GetOrdersQuery, IEnumerable<OrderDto>>
+{
+    private readonly OrderingDbContext _context;
+    private readonly IMapper _mapper;
+
+    public GetOrdersHandler(OrderingDbContext context, IMapper mapper)
+    {
+        _context = context;
+        _mapper = mapper;
+    }
+
+    public async Task<IEnumerable<OrderDto>> Handle(GetOrdersQuery request, CancellationToken cancellationToken)
+    {
+        var orders = await _context.Orders
+            .Include(o => o.Items)
+            .OrderByDescending(o => o.OrderDate)
+            .ToListAsync(cancellationToken);
+
+        return _mapper.Map<IEnumerable<OrderDto>>(orders);
+    }
+}
+```
+
+**Açıklamalar:**
+- `Include(o => o.Items)` → Navigation property ile OrderItems yüklenir
+- `OrderByDescending` → En yeni siparişler önce
+- AutoMapper ile DTO'ya map edilir
+
+**Ne işe yarar:**
+- Tüm siparişleri getirir (Admin için)
+
+**Sonuç:**
+- `GetOrdersQuery.cs` oluşturuldu
+- `GetOrdersHandler.cs` oluşturuldu
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı
+```
+
+---
+
+## Adım 8: GetOrderByIdQuery + Handler
+
+### GetOrderByIdQuery.cs
+
+**Dosya:** `Features/Orders/Queries/GetOrderById/GetOrderByIdQuery.cs`
+
+**Kod:**
+```csharp
+using MediatR;
+using Ordering.API.Dtos;
+
+namespace Ordering.API.Features.Orders.Queries.GetOrderById;
+
+public record GetOrderByIdQuery(Guid Id) : IRequest<OrderDto?>;
+```
+
+**Açıklamalar:**
+- Order ID alır
+- `IRequest<OrderDto?>` → OrderDto veya null döner
+
+**Ne işe yarar:**
+- Belirli bir siparişi getirir
+
+### GetOrderByIdHandler.cs
+
+**Dosya:** `Features/Orders/Queries/GetOrderById/GetOrderByIdHandler.cs`
+
+**Kod:**
+```csharp
+using AutoMapper;
+using MediatR;
+using Microsoft.EntityFrameworkCore;
+using Ordering.API.Data;
+using Ordering.API.Dtos;
+
+namespace Ordering.API.Features.Orders.Queries.GetOrderById;
+
+public class GetOrderByIdHandler : IRequestHandler<GetOrderByIdQuery, OrderDto?>
+{
+    private readonly OrderingDbContext _context;
+    private readonly IMapper _mapper;
+
+    public GetOrderByIdHandler(OrderingDbContext context, IMapper mapper)
+    {
+        _context = context;
+        _mapper = mapper;
+    }
+
+    public async Task<OrderDto?> Handle(GetOrderByIdQuery request, CancellationToken cancellationToken)
+    {
+        var order = await _context.Orders
+            .Include(o => o.Items)
+            .FirstOrDefaultAsync(o => o.Id == request.Id, cancellationToken);
+
+        if (order == null)
+            return null;
+
+        return _mapper.Map<OrderDto>(order);
+    }
+}
+```
+
+**Açıklamalar:**
+- `Include(o => o.Items)` → Navigation property ile OrderItems yüklenir
+- `FirstOrDefaultAsync` → Order bulunamazsa null döner
+- AutoMapper ile DTO'ya map edilir
+
+**Ne işe yarar:**
+- Belirli bir siparişi getirir
+
+**Sonuç:**
+- `GetOrderByIdQuery.cs` oluşturuldu
+- `GetOrderByIdHandler.cs` oluşturuldu
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı
+```
+
+---
+
+## Adım 9: GetOrdersByUserQuery + Handler
+
+### GetOrdersByUserQuery.cs
+
+**Dosya:** `Features/Orders/Queries/GetOrdersByUser/GetOrdersByUserQuery.cs`
+
+**Kod:**
+```csharp
+using MediatR;
+using Ordering.API.Dtos;
+
+namespace Ordering.API.Features.Orders.Queries.GetOrdersByUser;
+
+public record GetOrdersByUserQuery(string UserName) : IRequest<IEnumerable<OrderDto>>;
+```
+
+**Açıklamalar:**
+- UserName alır
+- `IRequest<IEnumerable<OrderDto>>` → OrderDto listesi döner
+
+**Ne işe yarar:**
+- Kullanıcıya ait siparişleri getirir
+
+### GetOrdersByUserHandler.cs
+
+**Dosya:** `Features/Orders/Queries/GetOrdersByUser/GetOrdersByUserHandler.cs`
+
+**Kod:**
+```csharp
+using AutoMapper;
+using MediatR;
+using Microsoft.EntityFrameworkCore;
+using Ordering.API.Data;
+using Ordering.API.Dtos;
+
+namespace Ordering.API.Features.Orders.Queries.GetOrdersByUser;
+
+public class GetOrdersByUserHandler : IRequestHandler<GetOrdersByUserQuery, IEnumerable<OrderDto>>
+{
+    private readonly OrderingDbContext _context;
+    private readonly IMapper _mapper;
+
+    public GetOrdersByUserHandler(OrderingDbContext context, IMapper mapper)
+    {
+        _context = context;
+        _mapper = mapper;
+    }
+
+    public async Task<IEnumerable<OrderDto>> Handle(GetOrdersByUserQuery request, CancellationToken cancellationToken)
+    {
+        var orders = await _context.Orders
+            .Include(o => o.Items)
+            .Where(o => o.UserName == request.UserName)
+            .OrderByDescending(o => o.OrderDate)
+            .ToListAsync(cancellationToken);
+
+        return _mapper.Map<IEnumerable<OrderDto>>(orders);
+    }
+}
+```
+
+**Açıklamalar:**
+- `Include(o => o.Items)` → Navigation property ile OrderItems yüklenir
+- `Where(o => o.UserName == request.UserName)` → Kullanıcıya göre filtreleme
+- `OrderByDescending` → En yeni siparişler önce
+- AutoMapper ile DTO'ya map edilir
+
+**Ne işe yarar:**
+- Kullanıcıya ait siparişleri getirir
+
+**Sonuç:**
+- `GetOrdersByUserQuery.cs` oluşturuldu
+- `GetOrdersByUserHandler.cs` oluşturuldu
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı
+```
+
+---
+
+## Faz 6.3 Özet
+
+### Tamamlanan Adımlar:
+1. ✅ MediatR, FluentValidation, AutoMapper konfigürasyonu (Program.cs)
+2. ✅ DTO'lar oluşturuldu (OrderDto, OrderItemDto)
+3. ✅ AutoMapper MappingProfile oluşturuldu
+4. ✅ CreateOrderCommand + Handler + Validator
+5. ✅ UpdateOrderCommand + Handler
+6. ✅ DeleteOrderCommand + Handler
+7. ✅ GetOrdersQuery + Handler
+8. ✅ GetOrderByIdQuery + Handler
+9. ✅ GetOrdersByUserQuery + Handler
+
+### Kontrol Sonuçları:
+- ✅ Build başarılı (0 hata, 0 uyarı)
+- ✅ Tüm handler'lar oluşturuldu
+- ✅ Validation kuralları doğru
+- ✅ Mapping doğru yapılandırıldı
+- ✅ Navigation property ile Include() kullanılıyor
+
+### Oluşturulan Dosyalar:
+
+#### DTO'lar:
+- `Dtos/OrderDto.cs` → Order DTO
+- `Dtos/OrderItemDto.cs` → OrderItem DTO
+
+#### Mapping:
+- `Mapping/MappingProfile.cs` → AutoMapper profile
+
+#### Commands:
+- `Features/Orders/Commands/CreateOrder/CreateOrderCommand.cs`
+- `Features/Orders/Commands/CreateOrder/CreateOrderHandler.cs`
+- `Features/Orders/Commands/CreateOrder/CreateOrderValidator.cs`
+- `Features/Orders/Commands/UpdateOrder/UpdateOrderCommand.cs`
+- `Features/Orders/Commands/UpdateOrder/UpdateOrderHandler.cs`
+- `Features/Orders/Commands/DeleteOrder/DeleteOrderCommand.cs`
+- `Features/Orders/Commands/DeleteOrder/DeleteOrderHandler.cs`
+
+#### Queries:
+- `Features/Orders/Queries/GetOrders/GetOrdersQuery.cs`
+- `Features/Orders/Queries/GetOrders/GetOrdersHandler.cs`
+- `Features/Orders/Queries/GetOrderById/GetOrderByIdQuery.cs`
+- `Features/Orders/Queries/GetOrderById/GetOrderByIdHandler.cs`
+- `Features/Orders/Queries/GetOrdersByUser/GetOrdersByUserQuery.cs`
+- `Features/Orders/Queries/GetOrdersByUser/GetOrdersByUserHandler.cs`
+
+### Önemli Notlar:
+
+#### CQRS Pattern:
+- **Commands** → Yazma işlemleri (CreateOrder, UpdateOrder, DeleteOrder)
+- **Queries** → Okuma işlemleri (GetOrders, GetOrderById, GetOrdersByUser)
+- Her feature kendi klasöründe (Vertical Slice Architecture)
+
+#### Validation:
+- FluentValidation ile request doğrulama
+- ValidationBehavior pipeline'da otomatik çalışır
+- Geçersiz request'ler otomatik yakalanır
+
+#### Mapping:
+- AutoMapper ile Entity ↔ DTO mapping
+- Enum → string conversion (OrderStatus)
+- Command → Entity mapping
+
+#### Navigation Property:
+- `Include(o => o.Items)` ile OrderItems yüklenir
+- DTO'lar kullanıldığı için döngüsel referans sorunu yok
+
+#### Soft Delete:
+- DeleteOrderHandler siparişi silmez, sadece `Cancelled` status'u verir
+- Veri bütünlüğü için (raporlama, analiz)
+
+#### Eksik (6.4'te eklenecek):
+- `BasketCheckoutEvent → CreateOrderCommand` mapping'i (MappingProfile'da)
+- RabbitMQ Consumer (BasketCheckoutConsumer)
+
+---
+
+**Tarih:** Aralık 2024  
+**Faz:** Faz 6.2 - Ordering Database & Seed Data, Faz 6.3 - Ordering CQRS - Commands & Queries  
+**Durum:** ✅ Tamamlandı
+
