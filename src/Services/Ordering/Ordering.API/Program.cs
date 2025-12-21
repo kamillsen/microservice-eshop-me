@@ -1,3 +1,6 @@
+using Ordering.API.Data;
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Controllers
@@ -15,7 +18,18 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
+// PostgreSQL
+builder.Services.AddDbContext<OrderingDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Database")));
+
 var app = builder.Build();
+
+// Migration
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+    await context.Database.MigrateAsync();
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
