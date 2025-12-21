@@ -38,6 +38,10 @@ public class BasketRepository : IBasketRepository
             .FirstOrDefaultAsync(x => x.Id == basketId);
     }
 
+    /// <summary>
+    /// Kullanıcının sepetini getirir. Kullanıcı sepetini görüntülemek istediğinde çalışır (GET /api/baskets/{userName}).
+    /// Önce Redis cache'e bakar, yoksa PostgreSQL'den alır ve cache'e yazar.
+    /// </summary>
     public async Task<ShoppingCart?> GetBasket(string userName)
     {
         try
@@ -75,6 +79,10 @@ public class BasketRepository : IBasketRepository
         }
     }
 
+    /// <summary>
+    /// Sepeti kaydeder veya günceller. Kullanıcı sepete ürün eklediğinde/güncellediğinde çalışır (POST /api/baskets).
+    /// Önce PostgreSQL'e yazar (kaynak veri), sonra Redis cache'e yazar (performans için).
+    /// </summary>
     public async Task<ShoppingCart> SaveBasket(ShoppingCart basket)
     {
         // 1. PostgreSQL'e yaz (source of truth)
@@ -109,13 +117,23 @@ public class BasketRepository : IBasketRepository
 
         await _context.SaveChangesAsync();
 
-        // 2. Redis'e yaz (cache) - SaveChanges sonrası basket'i yeniden yükle (Items için)
+        // 2. SaveChanges sonrası güncel basket'i yükle (Items için - ExecuteDeleteAsync tracking yapmadığı için)
+        // Sadece 1 kez yükle, hem Redis hem return için kullan (performans + güvenlik)
+        ShoppingCart savedBasket;
+        if (existing != null)
+        {
+            // Mevcut basket güncellendi - ExecuteDeleteAsync tracking yapmadığı için reload gerekli
+            savedBasket = await ReloadBasketWithItems(existing.Id) ?? existing;
+        }
+        else
+        {
+            // Yeni basket - SaveChanges sonrası ID'ler set edildi, basket zaten doğru (reload gerekmez)
+            savedBasket = basket;
+        }
+
+        // 3. Redis'e yaz (cache)
         try
         {
-            ShoppingCart savedBasket = existing != null 
-                ? (await ReloadBasketWithItems(existing.Id)) ?? existing
-                : basket;
-            
             var json = JsonSerializer.Serialize(savedBasket);
             await _redis.StringSetAsync(GetRedisKey(basket.UserName), json, CacheExpiration);
             _logger.LogInformation("Basket saved to database and cached for {UserName}", basket.UserName);
@@ -126,12 +144,13 @@ public class BasketRepository : IBasketRepository
             _logger.LogWarning(ex, "Redis unavailable, basket saved to database only for {UserName}", basket.UserName);
         }
 
-        // Return için de basket'i yeniden yükle
-        return existing != null 
-            ? (await ReloadBasketWithItems(existing.Id)) ?? existing
-            : basket;
+        return savedBasket;
     }
 
+    /// <summary>
+    /// Kullanıcının sepetini siler. Kullanıcı sepetini temizlediğinde çalışır (DELETE /api/baskets/{userName}).
+    /// Hem PostgreSQL'den hem de Redis cache'den siler.
+    /// </summary>
     public async Task<bool> DeleteBasket(string userName)
     {
         // 1. PostgreSQL'den sil
