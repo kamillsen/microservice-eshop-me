@@ -1785,3 +1785,620 @@ dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
 **Faz:** Faz 6.2 - Ordering Database & Seed Data, Faz 6.3 - Ordering CQRS - Commands & Queries  
 **Durum:** ✅ Tamamlandı
 
+---
+
+# Faz 6.4 - Ordering RabbitMQ Consumer Notları
+
+> Bu dosya, Faz 6.4 (Ordering RabbitMQ Consumer) adım adım yaparken öğrendiklerimi not aldığım dosyadır.
+> 
+> **İçerik:**
+> - Adım 1: BasketCheckoutConsumer oluştur
+> - Adım 2: MassTransit Consumer konfigürasyonu
+> - Adım 3: AutoMapper Event → Command mapping
+
+---
+
+## Faz 6.4 Nedir?
+
+**Faz 6.4**, Ordering Service'in RabbitMQ'dan `BasketCheckoutEvent`'i dinlemesini ve otomatik sipariş oluşturmasını sağlar. Event-driven architecture ile Basket Service ve Ordering Service arasında loose coupling sağlanır.
+
+### Temel İşlevler:
+- **BasketCheckoutConsumer** → RabbitMQ'dan event dinler
+- **Event → Command Mapping** → BasketCheckoutEvent'i CreateOrderCommand'e çevirir
+- **MediatR Integration** → Consumer, MediatR kullanarak CreateOrderHandler'ı çağırır
+- **Automatic Retry** → MassTransit otomatik retry mekanizması sağlar
+
+### Neden şimdi?
+- ✅ CQRS pattern hazır (CreateOrderCommand + Handler)
+- ✅ Basket Service checkout event gönderiyor
+- ✅ RabbitMQ hazır
+- ✅ Artık event-driven sipariş oluşturma yapılabilir
+
+---
+
+## Adım 1: BasketCheckoutConsumer Oluştur
+
+**Dosya:** `EventHandlers/BasketCheckoutConsumer.cs`
+
+**Kod:**
+```csharp
+using AutoMapper;
+using BuildingBlocks.Messaging.Events;
+using MassTransit;
+using MediatR;
+using Ordering.API.Features.Orders.Commands.CreateOrder;
+
+namespace Ordering.API.EventHandlers;
+
+public class BasketCheckoutConsumer : IConsumer<BasketCheckoutEvent>
+{
+    private readonly IMediator _mediator;
+    private readonly IMapper _mapper;
+    private readonly ILogger<BasketCheckoutConsumer> _logger;
+
+    public BasketCheckoutConsumer(
+        IMediator mediator,
+        IMapper mapper,
+        ILogger<BasketCheckoutConsumer> logger)
+    {
+        _mediator = mediator;
+        _mapper = mapper;
+        _logger = logger;
+    }
+
+    public async Task Consume(ConsumeContext<BasketCheckoutEvent> context)
+    {
+        _logger.LogInformation("BasketCheckoutEvent consumed. UserName: {UserName}, TotalPrice: {TotalPrice}",
+            context.Message.UserName, context.Message.TotalPrice);
+
+        try
+        {
+            // 1. Event'ten Command oluştur
+            var command = _mapper.Map<CreateOrderCommand>(context.Message);
+
+            // 2. MediatR ile CreateOrderHandler'ı çağır
+            var orderId = await _mediator.Send(command);
+
+            _logger.LogInformation("Order created from BasketCheckoutEvent. OrderId: {OrderId}, UserName: {UserName}",
+                orderId, context.Message.UserName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing BasketCheckoutEvent for UserName: {UserName}",
+                context.Message.UserName);
+            throw; // MassTransit otomatik retry yapar
+        }
+    }
+}
+```
+
+**Açıklamalar:**
+
+### IConsumer<BasketCheckoutEvent>:
+- MassTransit consumer interface'i
+- `Consume` metodu event geldiğinde çalışır
+- `ConsumeContext<BasketCheckoutEvent>` → Event mesajını içerir
+
+### Consumer İş Akışı:
+1. **Event'i logla** → Hangi event geldiğini loglar
+2. **Event → Command mapping** → AutoMapper ile CreateOrderCommand'e çevirir
+3. **MediatR ile Handler çağır** → CreateOrderHandler'ı çağırarak sipariş oluşturur
+4. **Exception handling** → Hata olursa throw eder (MassTransit otomatik retry yapar)
+
+### Neden MediatR kullanıyoruz?
+- **Separation of Concerns** → Consumer sadece event'i alır ve Command'e çevirir
+- **Business Logic Handler'da** → İş mantığı CreateOrderHandler'da (tekrar kullanılabilir)
+- **Test Edilebilirlik** → Handler'ı ayrı test edebiliriz
+- **Consistency** → REST API ve Consumer aynı handler'ı kullanır
+
+### Exception Handling:
+- `throw` → MassTransit otomatik retry mekanizması devreye girer
+- Retry policy MassTransit konfigürasyonunda tanımlı
+- Başarısız olursa Dead Letter Queue'ya gönderilir
+
+**Ne işe yarar:**
+- Basket Service'ten gelen checkout event'ini dinler
+- Event'i siparişe dönüştürür
+- MediatR ile CreateOrderHandler'ı çağırır
+
+**Sonuç:**
+- `EventHandlers/BasketCheckoutConsumer.cs` oluşturuldu
+- Consumer, MediatR ve AutoMapper kullanıyor
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı (0 hata, 0 uyarı)
+```
+
+---
+
+## Adım 2: MassTransit Consumer Konfigürasyonu
+
+**Dosya:** `Program.cs`
+
+**Eklenen Kod:**
+```csharp
+using MassTransit;
+using Ordering.API.EventHandlers;
+
+// MassTransit (Consumer)
+builder.Services.AddMassTransit(config =>
+{
+    // Consumer'ı ekle
+    config.AddConsumer<BasketCheckoutConsumer>();
+
+    config.UsingRabbitMq((context, cfg) =>
+    {
+        cfg.Host(builder.Configuration["MessageBroker:Host"], "/", h =>
+        {
+            h.Username("guest");
+            h.Password("guest");
+        });
+
+        // Endpoint'leri otomatik configure et
+        cfg.ConfigureEndpoints(context);
+    });
+});
+```
+
+**Açıklamalar:**
+
+### AddMassTransit:
+- `AddConsumer<BasketCheckoutConsumer>()` → Consumer'ı DI container'a kaydeder
+- `UsingRabbitMq()` → RabbitMQ provider kullanılır
+- `ConfigureEndpoints()` → Consumer endpoint'lerini otomatik oluşturur
+
+### RabbitMQ Host Konfigürasyonu:
+- `cfg.Host()` → RabbitMQ host adresi (`appsettings.json`'dan okunur)
+- `h.Username("guest")` → RabbitMQ kullanıcı adı
+- `h.Password("guest")` → RabbitMQ şifresi
+- Connection string: `amqp://guest:guest@localhost:5673`
+
+### MassTransit Queue Yapısı:
+- **Queue adı:** `BasketCheckoutEvent` (event adından türetilir)
+- **Exchange:** `BasketCheckoutEvent` (topic exchange)
+- **Routing key:** `BasketCheckoutEvent`
+- MassTransit otomatik olarak queue, exchange ve binding'leri oluşturur
+
+### ConfigureEndpoints:
+- Consumer'ları otomatik olarak endpoint'lere bağlar
+- Queue adını event adından türetir
+- Her consumer için ayrı queue oluşturur
+
+**Ne işe yarar:**
+- Consumer'ı DI container'a kaydeder
+- RabbitMQ bağlantısını yapılandırır
+- Consumer endpoint'lerini otomatik oluşturur
+
+**Sonuç:**
+- `Program.cs` dosyasına MassTransit konfigürasyonu eklendi
+- Consumer kaydedildi ve RabbitMQ bağlantısı yapılandırıldı
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı
+```
+
+---
+
+## Adım 3: AutoMapper Event → Command Mapping
+
+**Dosya:** `Mapping/MappingProfile.cs`
+
+**Eklenen Kod:**
+```csharp
+using BuildingBlocks.Messaging.Events;
+
+// Event → Command (Consumer için)
+CreateMap<BasketCheckoutEvent, CreateOrderCommand>()
+    .ForMember(dest => dest.Items, opt => opt.MapFrom(src => new List<OrderItemDto>())); // Items Basket'ten gelmez, event'te yok - boş liste
+```
+
+**Açıklamalar:**
+
+### BasketCheckoutEvent → CreateOrderCommand Mapping:
+- Event'teki tüm property'ler Command'e map edilir
+- `Items` → Boş liste olarak atanır (event'te Items yok)
+- **Not:** Gelecekte `BasketCheckoutEvent`'e `Items` eklendiğinde mapping güncellenecek
+
+### Items Neden Boş?
+- `BasketCheckoutEvent` şu anda `Items` içermiyor (sadece toplam bilgiler var)
+- Event'ten gelen siparişlerde `Items` boş liste olacak
+- Gelecekte `BasketCheckoutEvent`'e `Items` eklendiğinde mapping güncellenecek
+
+### Validator Güncellemesi:
+- `CreateOrderValidator` güncellendi
+- `Items` için `.NotEmpty()` kuralı kaldırıldı
+- Event'ten gelen siparişler için `Items` boş olabilir
+
+**Ne işe yarar:**
+- Event'i Command'e çevirir
+- Consumer'da AutoMapper kullanılır
+- Mapping merkezi bir yerde yönetilir
+
+**Sonuç:**
+- `Mapping/MappingProfile.cs` dosyasına Event → Command mapping eklendi
+- `CreateOrderValidator` güncellendi (Items opsiyonel)
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı
+```
+
+---
+
+## Faz 6.4 Özet
+
+### Tamamlanan Adımlar:
+1. ✅ BasketCheckoutConsumer oluşturuldu
+2. ✅ MassTransit consumer konfigürasyonu eklendi (Program.cs)
+3. ✅ AutoMapper Event → Command mapping eklendi
+4. ✅ CreateOrderValidator güncellendi (Items opsiyonel)
+
+### Kontrol Sonuçları:
+- ✅ Build başarılı (0 hata, 0 uyarı)
+- ✅ Consumer oluşturuldu ve kaydedildi
+- ✅ Mapping doğru yapılandırıldı
+- ✅ Validator güncellendi
+
+### Oluşturulan Dosyalar:
+- `EventHandlers/BasketCheckoutConsumer.cs` → RabbitMQ Consumer
+
+### Güncellenen Dosyalar:
+- `Program.cs` → MassTransit consumer konfigürasyonu eklendi
+- `Mapping/MappingProfile.cs` → Event → Command mapping eklendi
+- `Features/Orders/Commands/CreateOrder/CreateOrderValidator.cs` → Items validation kuralı kaldırıldı
+
+### Önemli Notlar:
+
+#### Event-Driven Architecture:
+- **Loose Coupling** → Basket Service, Ordering Service'i bilmez
+- **Asynchronous** → Event gönderilir, sipariş asenkron oluşturulur
+- **Scalability** → Birden fazla Ordering Service instance çalışabilir
+- **Retry Mechanism** → MassTransit otomatik retry yapar
+
+#### Consumer Pattern:
+- **IConsumer<T>** → MassTransit consumer interface'i
+- **MediatR Integration** → Consumer, MediatR kullanarak handler'ı çağırır
+- **Separation of Concerns** → Consumer sadece event'i alır, iş mantığı handler'da
+
+#### Items Eksikliği:
+- `BasketCheckoutEvent` şu anda `Items` içermiyor
+- Event'ten gelen siparişlerde `Items` boş liste olacak
+- Gelecekte `BasketCheckoutEvent`'e `Items` eklendiğinde mapping güncellenecek
+
+---
+
+# Faz 6.5 - Ordering Controller & Entegrasyon Notları
+
+> Bu dosya, Faz 6.5 (Ordering Controller & Entegrasyon) adım adım yaparken öğrendiklerimi not aldığım dosyadır.
+> 
+> **İçerik:**
+> - Adım 1: OrdersController oluştur
+> - Adım 2: Health Checks ekle (PostgreSQL + RabbitMQ)
+
+---
+
+## Faz 6.5 Nedir?
+
+**Faz 6.5**, Ordering Service için REST API endpoint'lerini ve health check'leri ekler. Controller-based API pattern kullanarak tüm CRUD işlemlerini expose eder.
+
+### Temel İşlevler:
+- **OrdersController** → REST API endpoint'leri (GET, POST, PUT, DELETE)
+- **Health Checks** → PostgreSQL ve RabbitMQ bağlantılarını kontrol eder
+- **Swagger Integration** → API dokümantasyonu ve test arayüzü
+
+### Neden şimdi?
+- ✅ CQRS pattern hazır (Commands + Queries)
+- ✅ Consumer hazır (event-driven sipariş oluşturma)
+- ✅ Artık REST API endpoint'leri eklenebilir
+- ✅ Health check'ler ile servis durumu izlenebilir
+
+---
+
+## Adım 1: OrdersController Oluştur
+
+**Dosya:** `Controllers/OrdersController.cs`
+
+**Kod:**
+```csharp
+using MediatR;
+using Microsoft.AspNetCore.Mvc;
+using Ordering.API.Dtos;
+using Ordering.API.Features.Orders.Commands.CreateOrder;
+using Ordering.API.Features.Orders.Commands.DeleteOrder;
+using Ordering.API.Features.Orders.Commands.UpdateOrder;
+using Ordering.API.Features.Orders.Queries.GetOrderById;
+using Ordering.API.Features.Orders.Queries.GetOrders;
+using Ordering.API.Features.Orders.Queries.GetOrdersByUser;
+
+namespace Ordering.API.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+public class OrdersController : ControllerBase
+{
+    private readonly IMediator _mediator;
+
+    public OrdersController(IMediator mediator)
+    {
+        _mediator = mediator;
+    }
+
+    [HttpGet]
+    [ProducesResponseType(typeof(IEnumerable<OrderDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<OrderDto>>> GetOrders()
+    {
+        var orders = await _mediator.Send(new GetOrdersQuery());
+        return Ok(orders);
+    }
+
+    [HttpGet("{id:guid}")]
+    [ProducesResponseType(typeof(OrderDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<OrderDto>> GetOrderById(Guid id)
+    {
+        var order = await _mediator.Send(new GetOrderByIdQuery(id));
+        if (order == null)
+            return NotFound();
+        return Ok(order);
+    }
+
+    [HttpGet("user/{userName}")]
+    [ProducesResponseType(typeof(IEnumerable<OrderDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<OrderDto>>> GetOrdersByUser(string userName)
+    {
+        var orders = await _mediator.Send(new GetOrdersByUserQuery(userName));
+        return Ok(orders);
+    }
+
+    [HttpPost]
+    [ProducesResponseType(typeof(Guid), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<Guid>> CreateOrder(CreateOrderCommand command)
+    {
+        var orderId = await _mediator.Send(command);
+        return CreatedAtAction(nameof(GetOrderById), new { id = orderId }, orderId);
+    }
+
+    [HttpPut("{id:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateOrder(Guid id, UpdateOrderCommand command)
+    {
+        if (id != command.Id)
+            return BadRequest("ID uyuşmuyor");
+
+        var result = await _mediator.Send(command);
+        if (!result)
+            return NotFound();
+
+        return NoContent();
+    }
+
+    [HttpDelete("{id:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteOrder(Guid id)
+    {
+        var result = await _mediator.Send(new DeleteOrderCommand(id));
+        if (!result)
+            return NotFound();
+
+        return NoContent();
+    }
+}
+```
+
+**Açıklamalar:**
+
+### API Endpoint'leri:
+
+#### GET /api/orders
+- **Açıklama:** Tüm siparişleri getirir (Admin için)
+- **Handler:** `GetOrdersQuery`
+- **Response:** `IEnumerable<OrderDto>`
+- **Status Code:** 200 OK
+
+#### GET /api/orders/{id}
+- **Açıklama:** Belirli bir siparişi getirir
+- **Handler:** `GetOrderByIdQuery`
+- **Response:** `OrderDto` veya 404 NotFound
+- **Status Code:** 200 OK veya 404 NotFound
+
+#### GET /api/orders/user/{userName}
+- **Açıklama:** Kullanıcıya ait siparişleri getirir
+- **Handler:** `GetOrdersByUserQuery`
+- **Response:** `IEnumerable<OrderDto>`
+- **Status Code:** 200 OK
+
+#### POST /api/orders
+- **Açıklama:** Manuel sipariş oluşturur (opsiyonel, genelde Consumer kullanılır)
+- **Handler:** `CreateOrderCommand`
+- **Response:** `Guid` (OrderId) veya 400 BadRequest
+- **Status Code:** 201 Created veya 400 BadRequest
+- **Location Header:** `CreatedAtAction` ile yeni siparişin URL'i döner
+
+#### PUT /api/orders/{id}
+- **Açıklama:** Sipariş durumunu günceller (Admin için)
+- **Handler:** `UpdateOrderCommand`
+- **Response:** 204 NoContent veya 404 NotFound
+- **Status Code:** 204 NoContent veya 404 NotFound
+
+#### DELETE /api/orders/{id}
+- **Açıklama:** Siparişi iptal eder (Cancelled status)
+- **Handler:** `DeleteOrderCommand`
+- **Response:** 204 NoContent veya 404 NotFound
+- **Status Code:** 204 NoContent veya 404 NotFound
+
+### Controller Pattern:
+- **MediatR Integration** → Controller, MediatR kullanarak handler'ları çağırır
+- **Separation of Concerns** → Controller sadece HTTP isteklerini yönetir, iş mantığı handler'da
+- **CQRS Pattern** → Commands ve Queries ayrı handler'larda
+
+### ProducesResponseType:
+- Swagger dokümantasyonu için response type'ları belirtilir
+- API dokümantasyonunda doğru response type'ları gösterilir
+
+**Ne işe yarar:**
+- REST API endpoint'lerini expose eder
+- MediatR ile handler'ları çağırır
+- HTTP status code'larını doğru döner
+
+**Sonuç:**
+- `Controllers/OrdersController.cs` oluşturuldu
+- Tüm CRUD endpoint'leri eklendi
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı
+```
+
+---
+
+## Adım 2: Health Checks Ekle
+
+**Dosya:** `Program.cs`
+
+**Eklenen Kod:**
+```csharp
+using RabbitMQ.Client;
+
+// RabbitMQ Connection Factory (Health Check için)
+builder.Services.AddSingleton<IConnectionFactory>(sp =>
+{
+    var connectionString = builder.Configuration["MessageBroker:Host"]!;
+    var uri = new Uri(connectionString);
+    return new ConnectionFactory
+    {
+        Uri = uri,
+        AutomaticRecoveryEnabled = true
+    };
+});
+
+// Health Checks
+builder.Services.AddHealthChecks()
+    .AddNpgSql(builder.Configuration.GetConnectionString("Database")!)
+    .AddRabbitMQ(); // DI container'dan IConnectionFactory'yi otomatik alır
+
+// ...
+
+// Health Checks
+app.MapHealthChecks("/health");
+```
+
+**Açıklamalar:**
+
+### IConnectionFactory Singleton:
+- **Neden Singleton?** → Health check'ler sık çağrılır, her seferinde yeni connection factory oluşturmak performans sorununa yol açar
+- **AutomaticRecoveryEnabled** → Bağlantı koparsa otomatik yeniden bağlanır
+- **DI Container** → `AddRabbitMQ()` parametresiz çağrıldığında DI container'dan `IConnectionFactory` otomatik alınır
+
+### Health Checks:
+- **AddNpgSql()** → PostgreSQL bağlantısını kontrol eder
+- **AddRabbitMQ()** → RabbitMQ bağlantısını kontrol eder (DI container'dan `IConnectionFactory` alır)
+- **MapHealthChecks("/health")** → `/health` endpoint'i eklendi
+
+### Health Check Response:
+```json
+{
+  "status": "Healthy",
+  "totalDuration": "00:00:00.1234567",
+  "entries": {
+    "NpgSql": {
+      "status": "Healthy",
+      "duration": "00:00:00.0123456"
+    },
+    "RabbitMQ": {
+      "status": "Healthy",
+      "duration": "00:00:00.0234567"
+    }
+  }
+}
+```
+
+### Health Check Kullanım Senaryoları:
+- **Docker Health Check** → Container'ın sağlıklı olup olmadığını kontrol eder
+- **Kubernetes Liveness/Readiness Probe** → Pod'un sağlıklı olup olmadığını kontrol eder
+- **Monitoring Tools** → Prometheus, Grafana gibi araçlarla servis durumu izlenir
+- **Load Balancer** → Sağlıksız instance'lar trafikten çıkarılır
+
+**Ne işe yarar:**
+- PostgreSQL ve RabbitMQ bağlantılarını kontrol eder
+- Servis durumunu izlemek için endpoint sağlar
+- Container orchestration için gerekli
+
+**Sonuç:**
+- `Program.cs` dosyasına Health Checks eklendi
+- IConnectionFactory singleton olarak kaydedildi
+- `/health` endpoint'i eklendi
+
+**Kontrol:**
+```bash
+dotnet build src/Services/Ordering/Ordering.API/Ordering.API.csproj
+# Build başarılı olmalı
+```
+
+**Test:**
+```bash
+# Uygulama çalışırken
+curl http://localhost:5003/health
+# JSON response dönmeli
+```
+
+---
+
+## Faz 6.5 Özet
+
+### Tamamlanan Adımlar:
+1. ✅ OrdersController oluşturuldu (tüm REST API endpoint'leri)
+2. ✅ Health Checks eklendi (PostgreSQL + RabbitMQ)
+3. ✅ IConnectionFactory singleton olarak kaydedildi
+
+### Kontrol Sonuçları:
+- ✅ Build başarılı (0 hata, 0 uyarı)
+- ✅ Controller oluşturuldu ve endpoint'ler eklendi
+- ✅ Health Checks eklendi ve çalışıyor
+
+### Oluşturulan Dosyalar:
+- `Controllers/OrdersController.cs` → REST API Controller
+
+### Güncellenen Dosyalar:
+- `Program.cs` → Health Checks eklendi, IConnectionFactory singleton olarak kaydedildi
+
+### Önemli Notlar:
+
+#### REST API Endpoint'leri:
+- **GET /api/orders** → Tüm siparişleri getirir (Admin)
+- **GET /api/orders/{id}** → Sipariş detayını getirir
+- **GET /api/orders/user/{userName}** → Kullanıcı siparişlerini getirir
+- **POST /api/orders** → Manuel sipariş oluşturur (opsiyonel)
+- **PUT /api/orders/{id}** → Sipariş durumunu günceller (Admin)
+- **DELETE /api/orders/{id}** → Siparişi iptal eder
+
+#### Health Checks:
+- **PostgreSQL** → Database bağlantısını kontrol eder
+- **RabbitMQ** → Message broker bağlantısını kontrol eder
+- **IConnectionFactory** → Singleton olarak kaydedildi (performans için)
+- **/health Endpoint** → Health check sonuçlarını döner
+
+#### Controller Pattern:
+- **MediatR Integration** → Controller, MediatR kullanarak handler'ları çağırır
+- **CQRS Pattern** → Commands ve Queries ayrı handler'larda
+- **Separation of Concerns** → Controller sadece HTTP isteklerini yönetir
+
+#### Swagger Integration:
+- Swagger konfigürasyonu zaten mevcut (Faz 6.1'de eklendi)
+- Controller endpoint'leri Swagger UI'da görünecek
+- `ProducesResponseType` attribute'ları ile dokümantasyon zenginleştirildi
+
+---
+
+**Tarih:** Aralık 2024  
+**Faz:** Faz 6.4 - Ordering RabbitMQ Consumer, Faz 6.5 - Ordering Controller & Entegrasyon  
+**Durum:** ✅ Tamamlandı
+
