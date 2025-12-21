@@ -2,6 +2,7 @@ using AutoMapper;
 using Ordering.API.Dtos;
 using Ordering.API.Entities;
 using Ordering.API.Features.Orders.Commands.CreateOrder;
+using BuildingBlocks.Messaging.Events;
 
 namespace Ordering.API.Mapping;
 
@@ -19,6 +20,10 @@ public class MappingProfile : Profile
             .ForMember(dest => dest.Items, opt => opt.Ignore()); // Items manuel eklenir
 
         CreateMap<OrderItemDto, OrderItem>();
+
+        // Event → Command (Consumer için)
+        CreateMap<BasketCheckoutEvent, CreateOrderCommand>()
+            .ForMember(dest => dest.Items, opt => opt.MapFrom(src => new List<OrderItemDto>())); // Items Basket'ten gelmez, event'te yok - boş liste
     }
 }
 

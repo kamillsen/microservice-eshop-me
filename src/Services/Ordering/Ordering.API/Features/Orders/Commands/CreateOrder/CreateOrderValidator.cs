@@ -13,8 +13,8 @@ public class CreateOrderValidator : AbstractValidator<CreateOrderCommand>
             .GreaterThan(0).WithMessage("TotalPrice 0'dan büyük olmalı");
 
         RuleFor(x => x.Items)
-            .NotNull().WithMessage("Items null olamaz")
-            .NotEmpty().WithMessage("Items boş olamaz");
+            .NotNull().WithMessage("Items null olamaz");
+            // .NotEmpty() kaldırıldı - Event'ten gelen siparişler için Items boş olabilir (gelecekte BasketCheckoutEvent'e Items eklenecek)
 
         RuleFor(x => x.EmailAddress)
             .NotEmpty().EmailAddress().WithMessage("Geçerli email adresi gerekli");

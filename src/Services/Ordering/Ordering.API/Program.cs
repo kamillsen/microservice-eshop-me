@@ -4,6 +4,9 @@ using MediatR;
 using BuildingBlocks.Behaviors.Behaviors;
 using FluentValidation;
 using BuildingBlocks.Exceptions.Handler;
+using MassTransit;
+using Ordering.API.EventHandlers;
+using RabbitMQ.Client;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -36,13 +39,49 @@ builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
 // AutoMapper
 builder.Services.AddAutoMapper(typeof(Program).Assembly);
 
+// MassTransit (Consumer)
+builder.Services.AddMassTransit(config =>
+{
+    // Consumer'ı ekle
+    config.AddConsumer<BasketCheckoutConsumer>();
+
+    config.UsingRabbitMq((context, cfg) =>
+    {
+        cfg.Host(builder.Configuration["MessageBroker:Host"], "/", h =>
+        {
+            h.Username("guest");
+            h.Password("guest");
+        });
+
+        // Endpoint'leri otomatik configure et
+        cfg.ConfigureEndpoints(context);
+    });
+});
+
 // PostgreSQL
 builder.Services.AddDbContext<OrderingDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Database")));
 
+// RabbitMQ Connection Factory (Health Check için)
+builder.Services.AddSingleton<IConnectionFactory>(sp =>
+{
+    var connectionString = builder.Configuration["MessageBroker:Host"]!;
+    var uri = new Uri(connectionString);
+    return new ConnectionFactory
+    {
+        Uri = uri,
+        AutomaticRecoveryEnabled = true
+    };
+});
+
 // Exception Handler
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
+
+// Health Checks
+builder.Services.AddHealthChecks()
+    .AddNpgSql(builder.Configuration.GetConnectionString("Database")!)
+    .AddRabbitMQ(); // DI container'dan IConnectionFactory'yi otomatik alır
 
 var app = builder.Build();
 
@@ -72,5 +111,8 @@ app.UseHttpsRedirection();
 
 // Controllers
 app.MapControllers();
+
+// Health Checks
+app.MapHealthChecks("/health");
 
 app.Run();
