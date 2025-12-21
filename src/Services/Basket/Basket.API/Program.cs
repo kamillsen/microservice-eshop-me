@@ -59,7 +59,21 @@ builder.Services.AddScoped<IBasketRepository, BasketRepository>();
 builder.Services.AddSingleton<DiscountProtoService.DiscountProtoServiceClient>(sp =>
 {
     var address = builder.Configuration["GrpcSettings:DiscountUrl"]!;
-    var channel = GrpcChannel.ForAddress(address);
+    
+    // Localhost'ta TLS olmadan HTTP/2 (h2c) kullanmak için özel HttpClient konfigürasyonu
+    var httpClientHandler = new HttpClientHandler();
+    var httpClient = new HttpClient(httpClientHandler)
+    {
+        DefaultVersionPolicy = System.Net.Http.HttpVersionPolicy.RequestVersionOrHigher,
+        DefaultRequestVersion = System.Net.HttpVersion.Version20
+    };
+    
+    var channelOptions = new GrpcChannelOptions
+    {
+        HttpClient = httpClient
+    };
+    
+    var channel = GrpcChannel.ForAddress(address, channelOptions);
     return new DiscountProtoService.DiscountProtoServiceClient(channel);
 });
 
@@ -71,11 +85,7 @@ builder.Services.AddMassTransit(config =>
 {
     config.UsingRabbitMq((context, cfg) =>
     {
-        cfg.Host(builder.Configuration["MessageBroker:Host"], "/", h =>
-        {
-            h.Username("guest");
-            h.Password("guest");
-        });
+        cfg.Host(builder.Configuration["MessageBroker:Host"]);
     });
 });
 
@@ -103,6 +113,9 @@ app.UseExceptionHandler();
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
+    // Developer Exception Page (detaylı hata mesajları için)
+    app.UseDeveloperExceptionPage();
+    
     // Swagger UI (OpenAPI spesifikasyonunu görselleştirir)
     app.UseSwagger();
     app.UseSwaggerUI(c =>

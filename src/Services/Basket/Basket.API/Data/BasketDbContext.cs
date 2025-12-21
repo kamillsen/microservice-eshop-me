@@ -18,8 +18,9 @@ public class BasketDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.UserName).IsUnique();
+            // Navigation property olmadan relationship tanımı (best practice - döngüsel referans yok)
             entity.HasMany(e => e.Items)
-                .WithOne(e => e.ShoppingCart)
+                .WithOne() // Navigation property yok
                 .HasForeignKey(e => e.ShoppingCartId)
                 .OnDelete(DeleteBehavior.Cascade);
         });

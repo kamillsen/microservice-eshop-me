@@ -411,12 +411,20 @@ namespace Basket.API.Entities;
 
 public class ShoppingCartItem
 {
+    public Guid Id { get; set; }
+    public Guid ShoppingCartId { get; set; }
+    // Navigation property yok - Referans projeye göre best practice (döngüsel referans sorunu olmaz)
+    
     public Guid ProductId { get; set; }
     public string ProductName { get; set; } = default!;
     public int Quantity { get; set; }
     public decimal Price { get; set; }
 }
 ```
+
+**Önemli Not:**
+- `ShoppingCart` navigation property **YOK** (best practice - döngüsel referans sorunu olmaz)
+- EF Core relationship `BasketDbContext.OnModelCreating` içinde `.WithOne()` ile tanımlanır (navigation property olmadan)
 
 **Açıklamalar:**
 - `ShoppingCart` → Sepet (UserName key, Items listesi, TotalPrice hesaplanan property)
@@ -644,6 +652,7 @@ dotnet build src/Services/Basket/Basket.API/Basket.API.csproj
 **Kod:**
 ```csharp
 using System.Text.Json;
+using AutoMapper;
 using Basket.API.Entities;
 using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
@@ -652,18 +661,33 @@ namespace Basket.API.Data;
 
 public class BasketRepository : IBasketRepository
 {
+    private const string RedisKeyPrefix = "basket:";
+    private static readonly TimeSpan CacheExpiration = TimeSpan.FromHours(24);
+    
     private readonly IDatabase _redis;
     private readonly BasketDbContext _context;
     private readonly ILogger<BasketRepository> _logger;
+    private readonly IMapper _mapper;
 
     public BasketRepository(
         IConnectionMultiplexer redis,
         BasketDbContext context,
-        ILogger<BasketRepository> logger)
+        ILogger<BasketRepository> logger,
+        IMapper mapper)
     {
         _redis = redis.GetDatabase();
         _context = context;
         _logger = logger;
+        _mapper = mapper;
+    }
+    
+    private string GetRedisKey(string userName) => $"{RedisKeyPrefix}{userName}";
+    
+    private async Task<ShoppingCart?> ReloadBasketWithItems(Guid basketId)
+    {
+        return await _context.ShoppingCarts
+            .Include(x => x.Items)
+            .FirstOrDefaultAsync(x => x.Id == basketId);
     }
 
     // ... metodlar (Cache-aside pattern)
@@ -672,8 +696,11 @@ public class BasketRepository : IBasketRepository
 
 **Önemli Değişiklikler:**
 - `BasketDbContext` dependency eklendi (PostgreSQL için)
+- `IMapper` dependency eklendi (AutoMapper - DRY prensibi için)
 - `_redis` ve `_context` field'ları var
 - Cache-aside pattern implementasyonu
+- **Helper methods**: `GetRedisKey()` ve `ReloadBasketWithItems()` (DRY prensibi)
+- **Constants**: `RedisKeyPrefix` ve `CacheExpiration` (DRY prensibi)
 
 ### IConnectionMultiplexer Nedir?
 
@@ -824,6 +851,8 @@ GetBasket("user2")
 
 ### SaveBasket Metodu (Cache-aside Pattern)
 
+**Not:** Bu metod EF Core 7+ best practice'lerini kullanır: `ExecuteDeleteAsync()` ve `AddRange()`, ayrıca AutoMapper ile DRY prensibine uygun.
+
 ```csharp
 public async Task<ShoppingCart> SaveBasket(ShoppingCart basket)
 {
@@ -840,26 +869,41 @@ public async Task<ShoppingCart> SaveBasket(ShoppingCart basket)
     }
     else
     {
-        // Mevcut item'ları sil
-        _context.ShoppingCartItems.RemoveRange(existing.Items);
-        // Yeni item'ları ekle
-        basket.Items.ForEach(item =>
+        // Mevcut item'ları sil (ExecuteDelete - direkt SQL DELETE, tracking sorunu yok)
+        await _context.ShoppingCartItems
+            .Where(x => x.ShoppingCartId == existing.Id)
+            .ExecuteDeleteAsync();
+        
+        // Yeni item'ları ekle (AutoMapper kullan - DRY prensibi, maintenance kolay)
+        var newItems = basket.Items.Select(item =>
         {
-            item.Id = Guid.NewGuid();
-            item.ShoppingCartId = existing.Id;
-        });
-        existing.Items = basket.Items;
-        _context.ShoppingCarts.Update(existing);
+            var entity = _mapper.Map<ShoppingCartItem>(item);
+            entity.Id = Guid.NewGuid();
+            entity.ShoppingCartId = existing.Id;
+            return entity;
+        }).ToList();
+        
+        _context.ShoppingCartItems.AddRange(newItems);
     }
 
     await _context.SaveChangesAsync();
 
-    // 2. Redis'e yaz (cache)
+    // 2. Redis'e yaz (cache) - SaveChanges sonrası existing'i yeniden yükle (Items için)
     try
     {
-        var savedBasket = existing ?? basket;
+        ShoppingCart savedBasket;
+        if (existing != null)
+        {
+            // ExecuteDelete sonrası existing.Items boş olabilir, yeniden yükle
+            savedBasket = await ReloadBasketWithItems(existing.Id) ?? existing;
+        }
+        else
+        {
+            savedBasket = basket;
+        }
+        
         var json = JsonSerializer.Serialize(savedBasket);
-        await _redis.StringSetAsync($"basket:{basket.UserName}", json, TimeSpan.FromHours(24));
+        await _redis.StringSetAsync(GetRedisKey(basket.UserName), json, CacheExpiration);
         _logger.LogInformation("Basket saved to database and cached for {UserName}", basket.UserName);
     }
     catch (RedisConnectionException ex)
@@ -868,9 +912,37 @@ public async Task<ShoppingCart> SaveBasket(ShoppingCart basket)
         _logger.LogWarning(ex, "Redis unavailable, basket saved to database only for {UserName}", basket.UserName);
     }
 
-    return existing ?? basket;
+    // Return için de existing'i yeniden yükle
+    if (existing != null)
+    {
+        return await ReloadBasketWithItems(existing.Id) ?? existing;
+    }
+    
+    return basket;
 }
+
+// Helper methods (DRY prensibi)
+private string GetRedisKey(string userName) => $"{RedisKeyPrefix}{userName}";
+
+private async Task<ShoppingCart?> ReloadBasketWithItems(Guid basketId)
+{
+    return await _context.ShoppingCarts
+        .Include(x => x.Items)
+        .FirstOrDefaultAsync(x => x.Id == basketId);
+}
+
+// Constants (DRY prensibi)
+private const string RedisKeyPrefix = "basket:";
+private static readonly TimeSpan CacheExpiration = TimeSpan.FromHours(24);
 ```
+
+**Önemli İyileştirmeler:**
+- **ExecuteDeleteAsync()**: EF Core 7+ özelliği, direkt SQL DELETE çalıştırır (tracking sorunu yok, daha performanslı)
+- **AddRange()**: Toplu ekleme, daha performanslı
+- **AutoMapper**: Manuel mapping yerine AutoMapper kullanımı (DRY prensibi, maintenance kolay)
+- **Helper Methods**: `GetRedisKey()` ve `ReloadBasketWithItems()` - kod tekrarını önler (DRY)
+- **Constants**: `RedisKeyPrefix` ve `CacheExpiration` - magic string/values yerine constant kullanımı (DRY)
+- **ReloadBasketWithItems()**: `ExecuteDeleteAsync()` sonrası `existing.Items` boş olabileceği için yeniden yükleme
 
 **Adım adım ne yapıyor? (Cache-aside Pattern)**
 
