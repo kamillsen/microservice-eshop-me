@@ -25,4 +25,4 @@ public class MappingProfile : Profile
         CreateMap<BasketCheckoutEvent, CreateOrderCommand>();
     }
 }
-
+ 

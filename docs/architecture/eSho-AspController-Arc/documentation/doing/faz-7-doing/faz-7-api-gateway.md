@@ -458,3 +458,4 @@ app.Run();
 
 **Not:** Gateway, tüm servislerin çalışır durumda olması gerektiği için en son yapılır. Gateway olmadan da servislere direkt erişilebilir, ama Gateway ile tek noktadan erişim sağlanır.
 
+
