@@ -39,11 +39,7 @@ builder.Services.AddMassTransit(config =>
 
     config.UsingRabbitMq((context, cfg) =>
     {
-        cfg.Host(builder.Configuration["MessageBroker:Host"], "/", h =>
-        {
-            h.Username("guest");
-            h.Password("guest");
-        });
+        cfg.Host(builder.Configuration["MessageBroker:Host"]);
 
         // Endpoint'leri otomatik configure et
         cfg.ConfigureEndpoints(context);
