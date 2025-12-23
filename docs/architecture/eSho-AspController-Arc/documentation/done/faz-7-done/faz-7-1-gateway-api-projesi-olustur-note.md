@@ -629,6 +629,306 @@ Gateway.API projesi solution'da görünüyor
 
 ---
 
+## 🧪 Faz 7.2 - YARP Routing Konfigürasyonu Testi
+
+> **Tarih:** Aralık 2024  
+> **Faz:** Faz 7 - API Gateway (YARP)  
+> **Görev:** Gateway routing'ini test et ve doğrula
+
+---
+
+### 📋 Genel Bakış
+
+**Amaç:** Gateway üzerinden tüm servislere erişimin çalıştığını doğrulamak.
+
+**Test Senaryoları:**
+- Catalog Route testi
+- Basket Route testi
+- Ordering Route testi
+- Path Transform kontrolü
+
+---
+
+### 🎯 Yapılan İşlemler
+
+#### 1. Port Ayarı (launchSettings.json)
+
+**Ne Yapıldı:**
+`Properties/launchSettings.json` dosyasında port `5000`'e ayarlandı.
+
+**Önce:**
+```json
+{
+  "profiles": {
+    "http": {
+      "applicationUrl": "http://localhost:5193"
+    },
+    "https": {
+      "applicationUrl": "https://localhost:7233;http://localhost:5193"
+    }
+  }
+}
+```
+
+**Sonra:**
+```json
+{
+  "profiles": {
+    "http": {
+      "applicationUrl": "http://localhost:5000"
+    },
+    "https": {
+      "applicationUrl": "https://localhost:7191;http://localhost:5000"
+    }
+  }
+}
+```
+
+**Neden Gerekli?**
+- Dokümantasyonda belirtilen port `5000`
+- Gateway'in standart port'u `5000`
+- Kullanıcılar `localhost:5000` üzerinden erişecek
+
+---
+
+#### 2. Servisleri Çalıştırma
+
+**Yapılan:**
+Tüm servisler çalıştırıldı (Gateway test edilecek servisler):
+
+| Servis | Port | Durum |
+|--------|------|-------|
+| **Catalog.API** | 5001 | ✅ Çalışıyor |
+| **Basket.API** | 5278 | ✅ Çalışıyor |
+| **Ordering.API** | 5103 | ✅ Çalışıyor |
+| **Gateway.API** | 5000 | ✅ Çalışıyor |
+
+**Kontrol:**
+- Her servis ayrı terminal'de çalıştırıldı
+- Health check endpoint'leri kontrol edildi
+- Container'lar (PostgreSQL, Redis, RabbitMQ) çalışıyor
+
+---
+
+#### 3. Route Testleri
+
+##### 3.1 Catalog Route Testi
+
+**Test Senaryosu:**
+1. Gateway üzerinden istek gönder
+2. Direkt Catalog.API'den istek gönder
+3. İki response'u karşılaştır
+
+**Gateway Üzerinden:**
+```bash
+curl http://localhost:5000/catalog-service/api/products
+```
+
+**Response:**
+```json
+[
+  {
+    "id": "a3e70032-d428-4a7b-87d2-b2c0a935de98",
+    "name": "Spor Ayakkabı",
+    "description": "Rahat koşu ayakkabısı",
+    "price": 1200.00,
+    ...
+  },
+  ... (9 ürün)
+]
+```
+
+**Direkt Catalog.API:**
+```bash
+curl http://localhost:5001/api/products
+```
+
+**Response:**
+```json
+[
+  {
+    "id": "a3e70032-d428-4a7b-87d2-b2c0a935de98",
+    "name": "Spor Ayakkabı",
+    "description": "Rahat koşu ayakkabısı",
+    "price": 1200.00,
+    ...
+  },
+  ... (9 ürün)
+]
+```
+
+**Sonuç:** ✅ **Başarılı**
+- İki response aynı
+- Gateway doğru yönlendiriyor
+- Path transform çalışıyor (`/catalog-service/api/products` → `/api/products`)
+
+---
+
+##### 3.2 Basket Route Testi
+
+**Test Senaryosu:**
+1. Gateway üzerinden istek gönder
+2. Direkt Basket.API'den istek gönder
+3. İki response'u karşılaştır
+
+**Gateway Üzerinden:**
+```bash
+curl http://localhost:5000/basket-service/api/baskets/user1
+```
+
+**Response:**
+```json
+{
+  "userName": "user1",
+  "items": [],
+  "totalPrice": 0,
+  "discount": 0
+}
+```
+
+**HTTP Status:** `200 OK`
+
+**Direkt Basket.API:**
+```bash
+curl http://localhost:5278/api/baskets/user1
+```
+
+**Response:**
+```json
+{
+  "userName": "user1",
+  "items": [],
+  "totalPrice": 0,
+  "discount": 0
+}
+```
+
+**HTTP Status:** `200 OK`
+
+**Sonuç:** ✅ **Başarılı**
+- İki response aynı
+- Gateway doğru yönlendiriyor
+- Path transform çalışıyor (`/basket-service/api/baskets/user1` → `/api/baskets/user1`)
+
+---
+
+##### 3.3 Ordering Route Testi
+
+**Test Senaryosu:**
+1. Gateway üzerinden istek gönder
+2. Direkt Ordering.API'den istek gönder
+3. İki response'u karşılaştır
+
+**Gateway Üzerinden:**
+```bash
+curl http://localhost:5000/ordering-service/api/orders
+```
+
+**Response:**
+```json
+[
+  {
+    "id": "bf107d9f-cc7e-46ac-8487-0c857e3a7a98",
+    "userName": "aliastest",
+    "totalPrice": 80000,
+    "orderDate": "2025-12-21T21:27:18.803139Z",
+    "status": "Pending",
+    "items": [...]
+  },
+  ... (9 sipariş)
+]
+```
+
+**HTTP Status:** `200 OK`
+
+**Direkt Ordering.API:**
+```bash
+curl http://localhost:5103/api/orders
+```
+
+**Response:**
+```json
+[
+  {
+    "id": "bf107d9f-cc7e-46ac-8487-0c857e3a7a98",
+    "userName": "aliastest",
+    "totalPrice": 80000,
+    "orderDate": "2025-12-21T21:27:18.803139Z",
+    "status": "Pending",
+    "items": [...]
+  },
+  ... (9 sipariş)
+]
+```
+
+**HTTP Status:** `200 OK`
+
+**Sonuç:** ✅ **Başarılı**
+- İki response aynı
+- Gateway doğru yönlendiriyor
+- Path transform çalışıyor (`/ordering-service/api/orders` → `/api/orders`)
+
+---
+
+#### 4. Path Transform Kontrolü
+
+**Ne Kontrol Edildi:**
+Path prefix'inin doğru kaldırıldığını doğrulamak.
+
+**Test Senaryosu:**
+```
+1. İstek: GET http://localhost:5000/catalog-service/api/products
+   ↓
+2. Gateway alır: /catalog-service/api/products
+   ↓
+3. Path Transform uygulanır: /catalog-service prefix'i kaldırılır
+   ↓
+4. Catalog.API'ye gönderilir: /api/products
+   ↓
+5. Sonuç: Doğru endpoint'e yönlendirilir ✅
+```
+
+**Doğrulama:**
+- ✅ Catalog Route: `/catalog-service/api/products` → `/api/products` ✅
+- ✅ Basket Route: `/basket-service/api/baskets/user1` → `/api/baskets/user1` ✅
+- ✅ Ordering Route: `/ordering-service/api/orders` → `/api/orders` ✅
+
+**Nasıl Çalışır?**
+- `appsettings.json`'daki `PathRemovePrefix` transform'u prefix'i kaldırır
+- Gateway URL'inde servis adı var (organizasyon için)
+- Backend servislerde prefix yok (temiz API)
+- Transform ile uyumluluk sağlanır
+
+---
+
+### ✅ Test Sonuçları Özeti
+
+| Test | Gateway URL | Direkt API URL | Sonuç |
+|------|------------|----------------|-------|
+| **Catalog Route** | `http://localhost:5000/catalog-service/api/products` | `http://localhost:5001/api/products` | ✅ Başarılı |
+| **Basket Route** | `http://localhost:5000/basket-service/api/baskets/user1` | `http://localhost:5278/api/baskets/user1` | ✅ Başarılı |
+| **Ordering Route** | `http://localhost:5000/ordering-service/api/orders` | `http://localhost:5103/api/orders` | ✅ Başarılı |
+| **Path Transform** | Prefix kaldırma | - | ✅ Çalışıyor |
+
+---
+
+### 🎯 Sonuç
+
+✅ **Faz 7.2 Tamamlandı**
+
+**Başarılar:**
+- ✅ Port ayarı yapıldı (5000)
+- ✅ Tüm servisler çalıştırıldı
+- ✅ Catalog Route testi başarılı
+- ✅ Basket Route testi başarılı
+- ✅ Ordering Route testi başarılı
+- ✅ Path Transform doğru çalışıyor
+- ✅ Gateway üzerinden tüm servislere erişim başarılı
+
+**Sonraki Adım:** Faz 7.3 - Gateway Health Checks
+
+---
+
 ## 📚 Öğrenilenler
 
 ### 1. Web API Template ve OpenAPI Çakışması
