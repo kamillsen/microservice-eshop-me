@@ -1867,7 +1867,7 @@ src/BuildingBlocks/
 |--------|--------------|-------|
 | **Catalog.API** | PostgreSQL | `AspNetCore.HealthChecks.NpgSql` |
 | **Basket.API** | Redis + PostgreSQL | `AspNetCore.HealthChecks.Redis`, `AspNetCore.HealthChecks.NpgSql` |
-| **Ordering.API** | PostgreSQL + RabbitMQ | `AspNetCore.HealthChecks.NpgSql`, `AspNetCore.HealthChecks.RabbitMQ` |
+| **Ordering.API** | PostgreSQL | `AspNetCore.HealthChecks.NpgSql` (RabbitMQ health check kaldırıldı - MassTransit zaten RabbitMQ'yu yönetiyor) |
 | **Discount.Grpc** | PostgreSQL | `AspNetCore.HealthChecks.NpgSql` |
 | **Gateway.API** | Downstream services | `AspNetCore.HealthChecks.Uris` |
 

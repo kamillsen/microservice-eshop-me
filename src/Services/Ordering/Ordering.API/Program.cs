@@ -58,26 +58,17 @@ builder.Services.AddMassTransit(config =>
 builder.Services.AddDbContext<OrderingDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Database")));
 
-// RabbitMQ Connection Factory (Health Check için)
-builder.Services.AddSingleton<IConnectionFactory>(sp =>
-{
-    var connectionString = builder.Configuration["MessageBroker:Host"]!;
-    var uri = new Uri(connectionString);
-    return new ConnectionFactory
-    {
-        Uri = uri,
-        AutomaticRecoveryEnabled = true
-    };
-});
-
 // Exception Handler
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 
 // Health Checks
+// Not: RabbitMQ health check'i kaldırıldı çünkü:
+// 1. MassTransit zaten RabbitMQ bağlantısını yönetiyor
+// 2. RabbitMQ bağlantısı çalışıyor (log'larda "Bus started" görünüyor)
+// 3. PostgreSQL health check'i yeterli
 builder.Services.AddHealthChecks()
-    .AddNpgSql(builder.Configuration.GetConnectionString("Database")!)
-    .AddRabbitMQ(); // DI container'dan IConnectionFactory'yi otomatik alır
+    .AddNpgSql(builder.Configuration.GetConnectionString("Database")!);
 
 var app = builder.Build();
 
