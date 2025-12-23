@@ -34,6 +34,7 @@ public class BasketRepository : IBasketRepository
     private async Task<ShoppingCart?> ReloadBasketWithItems(Guid basketId)
     {
         return await _context.ShoppingCarts
+            .AsNoTracking()
             .Include(x => x.Items)
             .FirstOrDefaultAsync(x => x.Id == basketId);
     }
@@ -85,54 +86,69 @@ public class BasketRepository : IBasketRepository
     /// </summary>
     public async Task<ShoppingCart> SaveBasket(ShoppingCart basket)
     {
-        // 1. PostgreSQL'de kullanıcının mevcut sepetini kontrol et
-        //    Varsa existing'e yüklenir, yoksa null döner
+        // 1. PostgreSQL'de kullanıcının mevcut sepetini kontrol et (sadece Id'ye ihtiyaç var)
         var existing = await _context.ShoppingCarts
-            .Include(x => x.Items)
-            .FirstOrDefaultAsync(x => x.UserName == basket.UserName);
+            .AsNoTracking()
+            .Where(x => x.UserName == basket.UserName)
+            .Select(x => new { x.Id })
+            .FirstOrDefaultAsync();
 
-        // 2. YENİ SEPET İSE: ID'ler atanıp PostgreSQL'e eklenir
-        if (existing == null)
+        // 2. Transaction başlat (ExecuteDelete + Insert + SaveChanges atomik olsun)
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        try
         {
-            // Sepet ve item'lara benzersiz ID'ler ata
-            basket.Id = Guid.NewGuid();
-            basket.Items.ForEach(item => item.Id = Guid.NewGuid());
-            // Yeni sepeti EF Core'a ekle (henüz DB'ye yazılmadı)
-            _context.ShoppingCarts.Add(basket);
-        }
-        // 3. MEVCUT SEPET İSE: Eski item'lar silinir, yeni item'lar eklenir
-        else
-        {
-            // Eski item'ları PostgreSQL'den direkt sil (ExecuteDeleteAsync tracking yapmaz)
-            await _context.ShoppingCartItems
-                .Where(x => x.ShoppingCartId == existing.Id)
-                .ExecuteDeleteAsync();
-            
-            // Kullanıcıdan gelen yeni item'ları entity'ye çevir ve hazırla
-            var newItems = basket.Items.Select(item =>
+            // 3. YENİ SEPET İSE: ID'ler atanıp PostgreSQL'e eklenir
+            if (existing == null)
             {
-                var entity = _mapper.Map<ShoppingCartItem>(item);
-                entity.Id = Guid.NewGuid();
-                entity.ShoppingCartId = existing.Id; // Mevcut sepete bağla
-                return entity;
-            }).ToList();
+                // Sepet ve item'lara benzersiz ID'ler ata
+                basket.Id = Guid.NewGuid();
+                basket.Items.ForEach(item => item.Id = Guid.NewGuid());
+                // Yeni sepeti EF Core'a ekle (henüz DB'ye yazılmadı)
+                _context.ShoppingCarts.Add(basket);
+            }
+            // 4. MEVCUT SEPET İSE: Eski item'lar silinir, yeni item'lar eklenir
+            else
+            {
+                // Eski item'ları PostgreSQL'den direkt sil (ExecuteDeleteAsync tracking yapmaz)
+                // Transaction içinde olduğu için atomik: Delete + Insert + SaveChanges birlikte commit olur
+                await _context.ShoppingCartItems
+                    .Where(x => x.ShoppingCartId == existing.Id)
+                    .ExecuteDeleteAsync();
+                
+                // Kullanıcıdan gelen yeni item'ları entity'ye çevir ve hazırla
+                var newItems = basket.Items.Select(item =>
+                {
+                    var entity = _mapper.Map<ShoppingCartItem>(item);
+                    entity.Id = Guid.NewGuid();
+                    entity.ShoppingCartId = existing.Id; // Mevcut sepete bağla
+                    return entity;
+                }).ToList();
+                
+                // Yeni item'ları EF Core'a ekle (henüz DB'ye yazılmadı)
+                _context.ShoppingCartItems.AddRange(newItems);
+            }
+
+            // 5. Tüm değişiklikleri PostgreSQL'e kaydet (INSERT veya DELETE+INSERT)
+            await _context.SaveChangesAsync();
             
-            // Yeni item'ları EF Core'a ekle (henüz DB'ye yazılmadı)
-            _context.ShoppingCartItems.AddRange(newItems);
+            // 6. Transaction commit et (tüm değişiklikler atomik olarak kaydedildi)
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            // Hata olursa transaction rollback et
+            await transaction.RollbackAsync();
+            throw;
         }
 
-        // 4. Tüm değişiklikleri PostgreSQL'e kaydet (INSERT veya DELETE+INSERT)
-        await _context.SaveChangesAsync();
-
-        // 5. savedBasket'e güncel veriyi ata (Redis'e yazmak ve döndürmek için)
+        // 7. savedBasket'e güncel veriyi ata (Redis'e yazmak ve döndürmek için)
         ShoppingCart savedBasket;
         if (existing != null)
         {
             // MEVCUT SEPET GÜNCELLENDİYSE:
-            // ExecuteDeleteAsync tracking yapmadığı için existing.Items eski veriyi içeriyor
-            // Bu yüzden PostgreSQL'den güncel veriyi çek (reload)
-            // Eğer reload null dönerse existing'i kullan (fallback)
-            savedBasket = await ReloadBasketWithItems(existing.Id) ?? existing;
+            // ExecuteDeleteAsync tracking yapmadığı için PostgreSQL'den güncel veriyi çek (reload)
+            savedBasket = await ReloadBasketWithItems(existing.Id) 
+                ?? throw new InvalidOperationException($"Basket {existing.Id} not found after update");
         }
         else
         {
@@ -142,7 +158,7 @@ public class BasketRepository : IBasketRepository
             savedBasket = basket;
         }
 
-        // 6. savedBasket'i Redis cache'e yaz (performans için)
+        // 8. savedBasket'i Redis cache'e yaz (performans için)
         try
         {
             // Basket'i JSON string'e çevir
@@ -157,7 +173,7 @@ public class BasketRepository : IBasketRepository
             _logger.LogWarning(ex, "Redis unavailable, basket saved to database only for {UserName}", basket.UserName);
         }
 
-        // 7. savedBasket'i döndür (API response olarak)
+        // 9. savedBasket'i döndür (API response olarak)
         return savedBasket;
     }
 

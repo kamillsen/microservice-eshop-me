@@ -2396,6 +2396,74 @@ curl http://localhost:5003/health
 - Controller endpoint'leri Swagger UI'da görünecek
 - `ProducesResponseType` attribute'ları ile dokümantasyon zenginleştirildi
 
+#### EF Core Repository Optimizasyonları (Basket API'den Öğrenilenler):
+
+Basket API'deki `BasketRepository` implementasyonunda yapılan optimizasyonlar, Ordering API'deki repository pattern'lerde de uygulanmalıdır:
+
+##### 1. Transaction Kullanımı (Kritik - Race Condition Önleme):
+- **Sorun:** `ExecuteDeleteAsync` ve `SaveChangesAsync` arasında race condition riski var
+- **Çözüm:** DELETE + INSERT + SaveChanges işlemlerini tek transaction içinde yap
+- **Örnek:**
+  ```csharp
+  await using var transaction = await _context.Database.BeginTransactionAsync();
+  try
+  {
+      await _context.OrderItems.ExecuteDeleteAsync(); // DELETE
+      _context.OrderItems.AddRange(newItems);         // INSERT
+      await _context.SaveChangesAsync();              // HEP BİRLİKTE
+      await transaction.CommitAsync();                // ATOMIK
+  }
+  catch
+  {
+      await transaction.RollbackAsync(); // Hata olursa hepsi geri alınır
+      throw;
+  }
+  ```
+- **Fayda:** DELETE + INSERT + SaveChanges atomik olarak çalışır, race condition riski ortadan kalkar
+
+##### 2. Include Kaldırma (Performans İyileştirmesi):
+- **Sorun:** Sadece `Id`'ye ihtiyaç varken tüm entity ve navigation property'ler çekiliyor
+- **Çözüm:** Sadece ihtiyaç duyulan kolonları çek
+- **Örnek:**
+  ```csharp
+  // ÖNCE: Tüm item'ları çekiyordu
+  var existing = await _context.Orders
+      .Include(x => x.Items)  // ❌ Gereksiz
+      .FirstOrDefaultAsync(...);
+
+  // SONRA: Sadece Id çek
+  var existing = await _context.Orders
+      .AsNoTracking()
+      .Where(x => x.UserName == userName)
+      .Select(x => new { x.Id })  // ✅ Sadece Id
+      .FirstOrDefaultAsync();
+  ```
+- **Fayda:** Daha az network trafiği, daha az memory kullanımı, daha hızlı sorgu
+
+##### 3. AsNoTracking Kullanımı (Performans İyileştirmesi):
+- **Sorun:** Read-only sorgularda EF Core tracking gereksiz overhead yaratıyor
+- **Çözüm:** Read-only sorgularda `AsNoTracking()` kullan
+- **Örnek:**
+  ```csharp
+  // Read-only sorgular için
+  var orders = await _context.Orders
+      .AsNoTracking()  // ✅ Tracking kapalı
+      .Include(o => o.Items)
+      .ToListAsync();
+  ```
+- **Fayda:** Daha az memory kullanımı, daha hızlı query (%10-30 performans artışı)
+
+##### 4. Optimizasyonların Birlikte Kullanımı:
+- Bu üç optimizasyon birlikte uygulandığında:
+  - ✅ Veri tutarlılığı artar (transaction)
+  - ✅ Query performansı artar (include + tracking)
+  - ✅ Memory kullanımı azalır
+- **Not:** Ordering API'deki handler'larda (özellikle CreateOrderHandler, UpdateOrderHandler) bu optimizasyonlar uygulanmalıdır
+
+##### 5. Cache-Aside Pattern (Redis için):
+- Basket API'de kullanılan Cache-Aside pattern, Ordering API için gerekli değil (siparişler cache'lenmez)
+- Ancak gelecekte performans ihtiyacı olursa aynı pattern uygulanabilir
+
 ---
 
 **Tarih:** Aralık 2024  
