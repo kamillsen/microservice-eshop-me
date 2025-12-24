@@ -40,6 +40,11 @@ WORKDIR /app
 # Publish edilmiş dosyaları kopyala (kaynak kodlar değil, sadece çalıştırılabilir dosyalar)
 COPY --from=build /app/publish .
 
+# wget kurulumu (health check için gerekli)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends wget && \
+    rm -rf /var/lib/apt/lists/*
+
 # Container portu
 EXPOSE 8080
 

@@ -269,7 +269,10 @@ WORKDIR /app
 COPY --from=build /app/publish .
 
 # Expose port
-EXPOSE 8080
+# Container portları
+# 8080: gRPC (HTTP/2 only)
+# 8081: Health check (HTTP/1.1 only)
+EXPOSE 8080 8081
 
 # Set environment variable
 ENV ASPNETCORE_URLS=http://+:8080

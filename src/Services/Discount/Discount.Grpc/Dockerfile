@@ -35,8 +35,15 @@ WORKDIR /app
 # Publish edilmiş dosyaları kopyala
 COPY --from=build /app/publish .
 
-# Container portu (gRPC servisleri de HTTP/2 üzerinden çalışır)
-EXPOSE 8080
+# wget kurulumu (health check için gerekli)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends wget && \
+    rm -rf /var/lib/apt/lists/*
+
+# Container portları
+# 8080: gRPC (HTTP/2 only)
+# 8081: Health check (HTTP/1.1 only)
+EXPOSE 8080 8081
 
 # ASP.NET Core port ayarı
 ENV ASPNETCORE_URLS=http://+:8080

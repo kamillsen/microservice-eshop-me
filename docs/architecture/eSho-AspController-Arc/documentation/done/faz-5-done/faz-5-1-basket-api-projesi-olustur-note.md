@@ -1597,11 +1597,35 @@ using Basket.API.GrpcServices;
 using Discount.Grpc.Protos;
 using Grpc.Net.Client;
 
-// gRPC Client
+// gRPC Client - HTTP/2 cleartext (h2c) desteği için
+// Docker container içinde TLS olmadan HTTP/2 kullanımı için gerekli
+AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
+
 builder.Services.AddSingleton<DiscountProtoService.DiscountProtoServiceClient>(sp =>
 {
     var address = builder.Configuration["GrpcSettings:DiscountUrl"]!;
-    var channel = GrpcChannel.ForAddress(address);
+    
+    // HTTP/2 cleartext (h2c) desteği için SocketsHttpHandler kullan
+    // HttpClientHandler HTTP/2 cleartext'i desteklemez
+    var socketsHandler = new System.Net.Http.SocketsHttpHandler
+    {
+        EnableMultipleHttp2Connections = true
+    };
+    
+    var httpClient = new HttpClient(socketsHandler)
+    {
+        DefaultVersionPolicy = System.Net.Http.HttpVersionPolicy.RequestVersionOrHigher,
+        DefaultRequestVersion = System.Net.HttpVersion.Version20
+    };
+    
+    var channelOptions = new GrpcChannelOptions
+    {
+        HttpClient = httpClient,
+        // HTTP/2 cleartext (h2c) için Insecure credentials kullan
+        Credentials = Grpc.Core.ChannelCredentials.Insecure
+    };
+    
+    var channel = GrpcChannel.ForAddress(address, channelOptions);
     return new DiscountProtoService.DiscountProtoServiceClient(channel);
 });
 
@@ -1711,7 +1735,13 @@ Request 3:
 **Neden HTTP?**
 - gRPC HTTP/2 kullanır
 - URL format: `http://` veya `https://`
-- Port: Discount.Grpc'ın dinlediği port
+- Port: Discount.Grpc'ın dinlediği port (8080 - gRPC port)
+
+**HTTP/2 Cleartext (h2c) Desteği:**
+- Docker container içinde TLS olmadan HTTP/2 kullanımı için `Http2UnencryptedSupport` switch'i aktif edilmeli
+- `SocketsHttpHandler` kullanılmalı (HttpClientHandler HTTP/2 cleartext'i desteklemez)
+- `ChannelCredentials.Insecure` kullanılmalı (HTTP/2 cleartext için)
+- Discount.Grpc servisi Prior Knowledge mode'da çalışıyor (sadece Http2 protokolü - 8080 portu)
 
 **Sonuç:**
 - gRPC client Singleton olarak kaydedildi

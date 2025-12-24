@@ -740,12 +740,39 @@ public class DiscountGrpcService
 
 ```csharp
 using Basket.API.GrpcServices;
-using Basket.API.Protos;
+using Discount.Grpc.Protos;
+using Grpc.Net.Client;
 
-// gRPC Client
-builder.Services.AddGrpcClient<DiscountProtoService.DiscountProtoServiceClient>(options =>
+// gRPC Client - HTTP/2 cleartext (h2c) desteği için
+// Docker container içinde TLS olmadan HTTP/2 kullanımı için gerekli
+AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
+
+builder.Services.AddSingleton<DiscountProtoService.DiscountProtoServiceClient>(sp =>
 {
-    options.Address = new Uri(builder.Configuration["GrpcSettings:DiscountUrl"]!);
+    var address = builder.Configuration["GrpcSettings:DiscountUrl"]!;
+    
+    // HTTP/2 cleartext (h2c) desteği için SocketsHttpHandler kullan
+    // HttpClientHandler HTTP/2 cleartext'i desteklemez
+    var socketsHandler = new System.Net.Http.SocketsHttpHandler
+    {
+        EnableMultipleHttp2Connections = true
+    };
+    
+    var httpClient = new HttpClient(socketsHandler)
+    {
+        DefaultVersionPolicy = System.Net.Http.HttpVersionPolicy.RequestVersionOrHigher,
+        DefaultRequestVersion = System.Net.HttpVersion.Version20
+    };
+    
+    var channelOptions = new GrpcChannelOptions
+    {
+        HttpClient = httpClient,
+        // HTTP/2 cleartext (h2c) için Insecure credentials kullan
+        Credentials = Grpc.Core.ChannelCredentials.Insecure
+    };
+    
+    var channel = GrpcChannel.ForAddress(address, channelOptions);
+    return new DiscountProtoService.DiscountProtoServiceClient(channel);
 });
 
 // DiscountGrpcService
@@ -753,11 +780,16 @@ builder.Services.AddScoped<DiscountGrpcService>();
 ```
 
 **Açıklama:**
-- `AddGrpcClient<T>` → gRPC client'ı DI'ya kaydeder
-- `Address` → Discount gRPC servis URL'i (appsettings.json'dan)
+- `Http2UnencryptedSupport` → Docker container içinde HTTP/2 cleartext için gerekli
+- `SocketsHttpHandler` → HttpClientHandler HTTP/2 cleartext'i desteklemez
+- `ChannelCredentials.Insecure` → HTTP/2 cleartext için insecure credentials
+- `AddSingleton` → gRPC channel pahalı, singleton olarak kaydedilir
 - `AddScoped<DiscountGrpcService>` → Wrapper service scoped
 
-**Önemli:** gRPC client HTTP/2 kullanır, `GrpcSettings:DiscountUrl` doğru olmalı.
+**Önemli:** 
+- gRPC client HTTP/2 cleartext (h2c) kullanır
+- Discount.Grpc servisi Prior Knowledge mode'da çalışıyor (sadece Http2 protokolü - 8080 portu)
+- `GrpcSettings:DiscountUrl` doğru olmalı (`http://discount.grpc:8080` container network içinde)
 
 ### Test:
 - gRPC client Discount'a bağlanıyor mu? (Discount.Grpc servisi çalışırken test et)

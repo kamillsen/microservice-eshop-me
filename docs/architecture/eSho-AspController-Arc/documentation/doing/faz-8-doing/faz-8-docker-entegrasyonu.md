@@ -259,8 +259,10 @@ WORKDIR /app
 # Copy published files
 COPY --from=build /app/publish .
 
-# Expose port
-EXPOSE 8080
+# Container portları
+# 8080: gRPC (HTTP/2 only)
+# 8081: Health check (HTTP/1.1 only)
+EXPOSE 8080 8081
 
 # Set environment variable
 ENV ASPNETCORE_URLS=http://+:8080
@@ -271,6 +273,8 @@ ENTRYPOINT ["dotnet", "Discount.Grpc.dll"]
 
 **Açıklama:**
 - Discount.Grpc için BuildingBlocks gerekmez (bağımsız gRPC servisi)
+- **HTTP/2 Cleartext (h2c) Desteği:** Port 8080 sadece HTTP/2 (gRPC için), Port 8081 sadece HTTP/1.1 (health check için)
+- **Prior Knowledge Mode:** HTTP/2 cleartext için Kestrel sadece Http2 protokolünü kullanmalı
 
 **Build Komutu:**
 ```bash
@@ -481,9 +485,10 @@ services:
       discountdb:
         condition: service_healthy
     ports:
-      - "5004:8080"
+      - "5004:8080"  # gRPC port (HTTP/2 only)
+      - "5005:8081"  # Health check port (HTTP/1.1 only)
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -887,8 +892,11 @@ curl http://localhost:5002/health
 # Ordering Health Check
 curl http://localhost:5003/health
 
-# Discount Health Check
-curl http://localhost:5004/health
+# Discount Health Check (HTTP/1.1 port - 8081)
+curl http://localhost:5005/health
+# NOT: Discount.Grpc iki port kullanır:
+# - 5004:8080 (gRPC - HTTP/2 only)
+# - 5005:8081 (Health check - HTTP/1.1 only)
 ```
 
 **Beklenen Sonuç:**

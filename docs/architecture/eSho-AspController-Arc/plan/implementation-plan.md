@@ -262,8 +262,9 @@ amqp://{username}:{password}@{hostname}:{port}
 
 2. **final** stage → `mcr.microsoft.com/dotnet/aspnet:9.0`
    - Copy published files
-   - Expose port 8080
+   - Expose port 8080 (veya 8080 + 8081 Discount.Grpc için)
    - Entry point: `dotnet {ProjectName}.dll`
+   - **NOT:** Discount.Grpc için iki port expose edilir: 8080 (gRPC - HTTP/2), 8081 (Health check - HTTP/1.1)
 
 **Build context:** Solution root (shared projelere erişim için)
 
@@ -657,7 +658,16 @@ amqp://{username}:{password}@{hostname}:{port}
 - `discount.proto` dosyasını kopyala (`Protos/` klasörüne, Discount.Grpc'tan)
 - `.csproj` dosyasına proto reference ekle (`<Protobuf Include="Protos/discount.proto" GrpcServices="Client" />`)
 - `DiscountGrpcService` oluştur (wrapper class, `DiscountProtoService.DiscountProtoServiceClient` kullan)
-- `Program.cs`'de gRPC client konfigürasyonu (`AddGrpcClient<DiscountProtoService.DiscountProtoServiceClient>`)
+- `Program.cs`'de gRPC client konfigürasyonu:
+  - **HTTP/2 Cleartext (h2c) Desteği:** `AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);`
+  - **SocketsHttpHandler:** HTTP/2 cleartext için `SocketsHttpHandler` kullan (HttpClientHandler desteklemez)
+  - **ChannelCredentials.Insecure:** HTTP/2 cleartext için insecure credentials
+  - **HttpVersionPolicy:** `RequestVersionOrHigher` ve `DefaultRequestVersion.Version20`
+
+**Önemli Notlar:**
+- Docker container içinde TLS olmadan HTTP/2 kullanımı için `Http2UnencryptedSupport` switch'i aktif edilmeli
+- `SocketsHttpHandler` kullanılmalı (HttpClientHandler HTTP/2 cleartext'i desteklemez)
+- Discount.Grpc servisi Prior Knowledge mode'da çalışıyor (sadece Http2 protokolü)
 
 **Test:**
 - gRPC client Discount'a bağlanıyor mu? (servis çalışırken test et)
@@ -859,6 +869,23 @@ Gateway: Response'u kullanıcıya iletir
 ---
 
 ### 7.3 Gateway Health Checks
+**Hedef:** Gateway'in downstream servislerin sağlık durumunu kontrol etmesi
+
+**Görevler:**
+- `AspNetCore.HealthChecks.Uris` paketini ekle
+- `Program.cs`'de health check konfigürasyonu:
+  - **Container Network:** Health check URL'leri container network adreslerini kullanmalı (`http://catalog.api:8080/health`, `http://basket.api:8080/health`, `http://ordering.api:8080/health`)
+  - **NOT:** Localhost yerine container service adları kullanılmalı (Docker Compose network içinde)
+- `MapHealthChecks("/health")` endpoint'ini ekle
+
+**Önemli Notlar:**
+- Docker Compose içinde çalışırken health check URL'leri container service adlarını kullanmalı
+- Localhost'tan test ederken farklı URL'ler gerekebilir
+- Discount.Grpc health check'i Gateway'den kontrol edilmez (gRPC servisi, HTTP health check endpoint'i yok)
+
+**Test:**
+- Gateway health check endpoint'i çalışıyor mu? (`http://localhost:5000/health`)
+- Downstream servislerin health check'leri doğru çalışıyor mu?
 **Hedef:** Downstream servislerin sağlığını kontrol et
 
 **Görevler:**

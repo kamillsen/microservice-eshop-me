@@ -846,9 +846,10 @@ Discount Service, ürünlere özel **indirim kuponlarını** yönetir. Basket Se
 
 | Özellik | Değer |
 |---------|-------|
-| **Port** | 8080 (internal) |
-| **Protocol** | gRPC (REST değil!) |
+| **Port** | 8080 (gRPC - HTTP/2 only), 8081 (Health check - HTTP/1.1 only) |
+| **Protocol** | gRPC (REST değil!) - HTTP/2 cleartext (h2c) |
 | **Database** | PostgreSQL |
+| **HTTP/2 Cleartext** | Prior Knowledge mode (sadece Http2 protokolü) |
 
 > **Not:** Discount servisi gRPC kullandığı için MediatR kullanmıyor. gRPC servisleri doğrudan repository ile çalışır.
 
@@ -1119,7 +1120,14 @@ services:
     depends_on:
       - discountdb
     ports:
-      - "5004:8080"
+      - "5004:8080"  # gRPC port (HTTP/2 only)
+      - "5005:8081"  # Health check port (HTTP/1.1 only)
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   gateway.api:
     image: ${DOCKER_REGISTRY-}gatewayapi
@@ -1578,6 +1586,46 @@ public class DiscountService : DiscountProtoService.DiscountProtoServiceBase
 
 ### gRPC Client (Basket.API)
 
+**HTTP/2 Cleartext (h2c) Konfigürasyonu:**
+
+Docker container içinde TLS olmadan HTTP/2 kullanımı için özel konfigürasyon gerekir:
+
+```csharp
+// Basket.API/Program.cs
+// HTTP/2 cleartext desteği için AppContext switch'i
+AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
+
+// gRPC Client konfigürasyonu
+builder.Services.AddSingleton<DiscountProtoService.DiscountProtoServiceClient>(sp =>
+{
+    var address = builder.Configuration["GrpcSettings:DiscountUrl"]!;
+    
+    // HTTP/2 cleartext için SocketsHttpHandler kullan (HttpClientHandler desteklemez)
+    var socketsHandler = new System.Net.Http.SocketsHttpHandler
+    {
+        EnableMultipleHttp2Connections = true
+    };
+    
+    var httpClient = new HttpClient(socketsHandler)
+    {
+        DefaultVersionPolicy = System.Net.Http.HttpVersionPolicy.RequestVersionOrHigher,
+        DefaultRequestVersion = System.Net.HttpVersion.Version20
+    };
+    
+    var channelOptions = new GrpcChannelOptions
+    {
+        HttpClient = httpClient,
+        // HTTP/2 cleartext için Insecure credentials
+        Credentials = Grpc.Core.ChannelCredentials.Insecure
+    };
+    
+    var channel = GrpcChannel.ForAddress(address, channelOptions);
+    return new DiscountProtoService.DiscountProtoServiceClient(channel);
+});
+```
+
+**Wrapper Service:**
+
 ```csharp
 // Basket.API/GrpcServices/DiscountGrpcService.cs
 public class DiscountGrpcService
@@ -1603,6 +1651,12 @@ public class DiscountGrpcService
     }
 }
 ```
+
+**Önemli Notlar:**
+- **Http2UnencryptedSupport:** Docker container içinde HTTP/2 cleartext için gerekli
+- **SocketsHttpHandler:** HttpClientHandler HTTP/2 cleartext'i desteklemez, SocketsHttpHandler kullanılmalı
+- **ChannelCredentials.Insecure:** HTTP/2 cleartext için insecure credentials gerekli
+- **Prior Knowledge Mode:** Discount.Grpc servisi sadece Http2 protokolünü kullanır (8080 portu)
 
 ### gRPC Akışı
 
@@ -1869,7 +1923,7 @@ src/BuildingBlocks/
 | **Basket.API** | Redis + PostgreSQL | `AspNetCore.HealthChecks.Redis`, `AspNetCore.HealthChecks.NpgSql` |
 | **Ordering.API** | PostgreSQL | `AspNetCore.HealthChecks.NpgSql` (RabbitMQ health check kaldırıldı - MassTransit zaten RabbitMQ'yu yönetiyor) |
 | **Discount.Grpc** | PostgreSQL | `AspNetCore.HealthChecks.NpgSql` |
-| **Gateway.API** | Downstream services | `AspNetCore.HealthChecks.Uris` |
+| **Gateway.API** | Downstream services | `AspNetCore.HealthChecks.Uris` (Container network adresleri: `http://catalog.api:8080/health`, `http://basket.api:8080/health`, `http://ordering.api:8080/health`) |
 
 ### Endpoint'ler
 
