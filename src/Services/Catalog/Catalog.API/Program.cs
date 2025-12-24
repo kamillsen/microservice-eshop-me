@@ -77,7 +77,8 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-app.UseHttpsRedirection();
+// HTTPS redirection kaldırıldı - Container içinde HTTP kullanılıyor
+// app.UseHttpsRedirection();
 
 // Controllers
 app.MapControllers();

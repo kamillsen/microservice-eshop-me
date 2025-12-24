@@ -180,9 +180,10 @@ discount.grpc:
     discountdb:
       condition: service_healthy
   ports:
-    - "5004:8080"
+    - "5004:8080"  # gRPC port (HTTP/2 only)
+    - "5005:8081"  # Health check port (HTTP/1.1 only)
   healthcheck:
-    test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+    test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/health"]
     interval: 30s
     timeout: 10s
     retries: 3
@@ -190,8 +191,9 @@ discount.grpc:
 ```
 
 **Özellikler:**
-- Port: 5004 (host) → 8080 (container)
-- gRPC servisi (HTTP/2 ve HTTP/1.1 destekliyor - health check için)
+- Port: 5004:8080 (gRPC - HTTP/2 only), 5005:8081 (Health check - HTTP/1.1 only)
+- **HTTP/2 Cleartext (h2c):** Prior Knowledge mode (sadece Http2 protokolü)
+- **İki Port Stratejisi:** gRPC için 8080 (HTTP/2), health check için 8081 (HTTP/1.1)
 - Bağımlılık: PostgreSQL
 
 ### Gateway.API
@@ -314,35 +316,48 @@ RUN apt-get update && \
 - `src/Services/Discount/Discount.Grpc/Dockerfile`
 - `src/ApiGateway/Gateway.API/Dockerfile`
 
-### 2. Discount.Grpc HTTP/2 Sorunu
+### 2. Discount.Grpc HTTP/2 Cleartext (h2c) Sorunu
 
 **Sorun:**
-- Discount.Grpc sadece HTTP/2 dinliyordu (`Http2` protocol)
+- Discount.Grpc sadece HTTP/2 dinliyordu (`Http2` protocol - Prior Knowledge mode)
 - Health check HTTP/1.1 kullanıyordu
 - Health check başarısız oluyordu: "An HTTP/1.x request was sent to an HTTP/2 only endpoint"
+- HTTP/2 cleartext (h2c) için Prior Knowledge mode gerekli (sadece Http2 protokolü)
 
 **Çözüm:**
-`Program.cs`'de `Http2` yerine `Http1AndHttp2` kullanıldı:
+İki ayrı port kullanıldı: 8080 (HTTP/2 only - gRPC), 8081 (HTTP/1.1 only - Health check)
 
-**Öncesi:**
+**Program.cs Konfigürasyonu:**
 ```csharp
-options.ListenAnyIP(8080, listenOptions =>
+builder.WebHost.ConfigureKestrel(options =>
 {
-    listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http2;
+    // Port 8080: HTTP/2 ONLY - gRPC için (Prior Knowledge mode)
+    options.ListenAnyIP(8080, listenOptions =>
+    {
+        listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http2;
+    });
+    
+    // Port 8081: HTTP/1.1 ONLY - Health check için
+    options.ListenAnyIP(8081, listenOptions =>
+    {
+        listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1;
+    });
 });
 ```
 
-**Sonrası:**
-```csharp
-options.ListenAnyIP(8080, listenOptions =>
-{
-    // Http1AndHttp2: Hem HTTP/1.1 (health check için) hem HTTP/2 (gRPC için) destekle
-    listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2;
-});
+**Docker Compose Konfigürasyonu:**
+```yaml
+ports:
+  - "5004:8080"  # gRPC port (HTTP/2 only)
+  - "5005:8081"  # Health check port (HTTP/1.1 only)
+healthcheck:
+  test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/health"]
 ```
 
-**Etkilenen Dosya:**
-- `src/Services/Discount/Discount.Grpc/Program.cs`
+**Etkilenen Dosyalar:**
+- `src/Services/Discount/Discount.Grpc/Program.cs` (iki port konfigürasyonu)
+- `src/Services/Discount/Discount.Grpc/Dockerfile` (EXPOSE 8080 8081)
+- `docker-compose.yml` (iki port mapping)
 
 ---
 
@@ -354,7 +369,7 @@ options.ListenAnyIP(8080, listenOptions =>
 | **Catalog.API** | 5001 | 8080 | Ürün servisi |
 | **Basket.API** | 5002 | 8080 | Sepet servisi |
 | **Ordering.API** | 5003 | 8080 | Sipariş servisi |
-| **Discount.Grpc** | 5004 | 8080 | İndirim servisi (gRPC) |
+| **Discount.Grpc** | 5004:8080 (gRPC), 5005:8081 (Health) | 8080 (HTTP/2), 8081 (HTTP/1.1) | İndirim servisi (gRPC - HTTP/2 cleartext) |
 
 ---
 
@@ -388,9 +403,12 @@ curl http://localhost:5002/health
 curl http://localhost:5003/health
 # Çıktı: Healthy
 
-# Discount.Grpc
-curl http://localhost:5004/health
+# Discount.Grpc (Health check port - 8081)
+curl http://localhost:5005/health
 # Çıktı: Healthy
+# NOT: Discount.Grpc iki port kullanır:
+# - 5004:8080 (gRPC - HTTP/2 only)
+# - 5005:8081 (Health check - HTTP/1.1 only)
 
 # Gateway.API
 curl http://localhost:5000/health

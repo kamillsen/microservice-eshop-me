@@ -55,14 +55,22 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 // Repository
 builder.Services.AddScoped<IBasketRepository, BasketRepository>();
 
-// gRPC Client
+// gRPC Client - HTTP/2 cleartext (h2c) desteği için
+// Docker container içinde TLS olmadan HTTP/2 kullanımı için gerekli
+AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
+
 builder.Services.AddSingleton<DiscountProtoService.DiscountProtoServiceClient>(sp =>
 {
     var address = builder.Configuration["GrpcSettings:DiscountUrl"]!;
     
-    // Localhost'ta TLS olmadan HTTP/2 (h2c) kullanmak için özel HttpClient konfigürasyonu
-    var httpClientHandler = new HttpClientHandler();
-    var httpClient = new HttpClient(httpClientHandler)
+    // HTTP/2 cleartext (h2c) desteği için SocketsHttpHandler kullan
+    // HttpClientHandler HTTP/2 cleartext'i desteklemez
+    var socketsHandler = new System.Net.Http.SocketsHttpHandler
+    {
+        EnableMultipleHttp2Connections = true
+    };
+    
+    var httpClient = new HttpClient(socketsHandler)
     {
         DefaultVersionPolicy = System.Net.Http.HttpVersionPolicy.RequestVersionOrHigher,
         DefaultRequestVersion = System.Net.HttpVersion.Version20
@@ -70,7 +78,9 @@ builder.Services.AddSingleton<DiscountProtoService.DiscountProtoServiceClient>(s
     
     var channelOptions = new GrpcChannelOptions
     {
-        HttpClient = httpClient
+        HttpClient = httpClient,
+        // HTTP/2 cleartext (h2c) için Insecure credentials kullan
+        Credentials = Grpc.Core.ChannelCredentials.Insecure
     };
     
     var channel = GrpcChannel.ForAddress(address, channelOptions);
@@ -125,7 +135,8 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-app.UseHttpsRedirection();
+// HTTPS redirection kaldırıldı - Container içinde HTTP kullanılıyor
+// app.UseHttpsRedirection();
 
 // Controllers
 app.MapControllers();

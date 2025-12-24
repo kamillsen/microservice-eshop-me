@@ -208,9 +208,10 @@ services:
       discountdb:
         condition: service_healthy
     ports:
-      - "5004:8080"
+      - "5004:8080"  # gRPC port (HTTP/2 only)
+      - "5005:8081"  # Health check port (HTTP/1.1 only)
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/health"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -7,10 +7,11 @@ builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 
 // Health Checks (Downstream Services)
+// Container network içinde servis adlarını kullan
 builder.Services.AddHealthChecks()
-    .AddUrlGroup(new Uri("http://localhost:5001/health"), name: "catalog-api")
-    .AddUrlGroup(new Uri("http://localhost:5278/health"), name: "basket-api")
-    .AddUrlGroup(new Uri("http://localhost:5103/health"), name: "ordering-api");
+    .AddUrlGroup(new Uri("http://catalog.api:8080/health"), name: "catalog-api")
+    .AddUrlGroup(new Uri("http://basket.api:8080/health"), name: "basket-api")
+    .AddUrlGroup(new Uri("http://ordering.api:8080/health"), name: "ordering-api");
 
 var app = builder.Build();
 
