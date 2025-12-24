@@ -4,15 +4,17 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Kestrel: Localhost'ta TLS olmadan HTTP/2 için özel konfigürasyon (h2c - HTTP/2 cleartext)
-// NOT: Localhost'ta TLS olmadan HTTP/2 kullanmak için özel ayar gerekiyor
+// Kestrel: Docker container içinde HTTP/2 (gRPC) ve HTTP/1.1 (health check) desteği
+// NOT: Container içinde 0.0.0.0:8080 adresinde dinlemelidir
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.ListenLocalhost(5152, listenOptions =>
+    // Port 8080: Docker container içinde kullanılan port
+    // ListenAnyIP: Tüm network interface'lerde dinle (container network için gerekli)
+    options.ListenAnyIP(8080, listenOptions =>
     {
-        // Http2: Sadece HTTP/2 kullan (gRPC için gerekli)
-        // Localhost'ta TLS olmadan HTTP/2 cleartext (h2c) desteklenir
-        listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http2;
+        // Http1AndHttp2: Hem HTTP/1.1 (health check için) hem HTTP/2 (gRPC için) destekle
+        // Container içinde TLS olmadan HTTP/2 cleartext (h2c) desteklenir
+        listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2;
     });
 });
 

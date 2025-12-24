@@ -35,6 +35,11 @@ WORKDIR /app
 # Publish edilmiş dosyaları kopyala
 COPY --from=build /app/publish .
 
+# wget kurulumu (health check için gerekli)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends wget && \
+    rm -rf /var/lib/apt/lists/*
+
 # Container portu (gRPC servisleri de HTTP/2 üzerinden çalışır)
 EXPOSE 8080
 

@@ -61,6 +61,12 @@ WORKDIR /app
 # Bu sayede final image küçük kalır
 COPY --from=build /app/publish .
 
+# wget kurulumu (health check için gerekli)
+# Docker health check'leri için wget kullanılacak
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends wget && \
+    rm -rf /var/lib/apt/lists/*
+
 # EXPOSE = Container'ın hangi portu dinleyeceğini belirtir (dokümantasyon amaçlı)
 # 8080 = Internal container port (Docker Compose'da map edeceğiz)
 EXPOSE 8080
