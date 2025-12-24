@@ -1168,6 +1168,96 @@ builder.Services.AddHealthChecks()
 
 ---
 
+#### 4. Docker Compose Health Check Sorunu ve Çözümü
+
+**Sorun:**
+Gateway container'ı Docker Compose'da başlamıyordu. Container başladıktan sonra hemen kapanıyordu.
+
+**Hata Mesajı:**
+```
+fail: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check basket-api with status Unhealthy completed after 10000.2246ms with message '(null)'
+      System.Threading.Tasks.TaskCanceledException: The operation was canceled.
+      System.IO.IOException: Unable to read data from the transport connection: Operation canceled.
+```
+
+**Neden:**
+1. Gateway'in `/health` endpoint'i tüm downstream servislerin (catalog.api, basket.api, ordering.api) health check'lerini kontrol ediyordu
+2. Basket.api bazen yavaş başladığı için (10 saniye timeout) Gateway'in health check'i başarısız oluyordu
+3. Docker Compose, Gateway'in health check'i başarısız olunca container'ı unhealthy olarak işaretleyip kapatıyordu
+4. Bu bir **circular dependency** problemi yaratıyordu:
+   - Gateway, basket.api'nin healthy olmasını bekliyor
+   - Ama basket.api henüz tam başlamamış olabilir
+   - Gateway kapanıyor → Sistem çalışmıyor
+
+**Çözüm:**
+Gateway'in `/health` endpoint'ini sadece Gateway'in kendisini kontrol edecek şekilde değiştirdik. Downstream servislerin health check'lerini ayrı bir endpoint'e (`/health/downstream`) taşıdık.
+
+**Yapılan Değişiklikler:**
+
+**Gateway.API/Program.cs:**
+```csharp
+// Önce (Sorunlu):
+builder.Services.AddHealthChecks()
+    .AddUrlGroup(new Uri("http://catalog.api:8080/health"), name: "catalog-api")
+    .AddUrlGroup(new Uri("http://basket.api:8080/health"), name: "basket-api")
+    .AddUrlGroup(new Uri("http://ordering.api:8080/health"), name: "ordering-api");
+
+app.MapHealthChecks("/health"); // ❌ Tüm downstream servisleri kontrol ediyor
+
+// Sonra (Düzeltilmiş):
+// Health Checks
+// Downstream servislerin health check'leri (opsiyonel, ayrı endpoint'te kullanılacak)
+builder.Services.AddHealthChecks()
+    .AddUrlGroup(new Uri("http://catalog.api:8080/health"), name: "catalog-api", timeout: TimeSpan.FromSeconds(15))
+    .AddUrlGroup(new Uri("http://basket.api:8080/health"), name: "basket-api", timeout: TimeSpan.FromSeconds(15))
+    .AddUrlGroup(new Uri("http://ordering.api:8080/health"), name: "ordering-api", timeout: TimeSpan.FromSeconds(15));
+
+// Gateway'in kendi health check'i (Docker Compose için)
+// Sadece Gateway'in çalışıp çalışmadığını kontrol eder
+app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    // Sadece Gateway'in kendisini kontrol et (downstream servisler kritik değil)
+    Predicate = _ => false
+});
+
+// Downstream servislerin health check'leri (opsiyonel, monitoring için)
+app.MapHealthChecks("/health/downstream", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    // Tüm downstream servislerin health check'lerini göster
+    Predicate = check => check.Name.Contains("-api")
+});
+```
+
+**Değişikliklerin Açıklaması:**
+
+1. **`/health` Endpoint'i:**
+   - Artık sadece Gateway'in kendisini kontrol ediyor
+   - `Predicate = _ => false` → Hiçbir health check çalıştırılmıyor, sadece Gateway'in durumu dönüyor
+   - Docker Compose için yeterli (Gateway çalışıyorsa healthy)
+
+2. **`/health/downstream` Endpoint'i:**
+   - Downstream servislerin health check'lerini gösteriyor
+   - Monitoring ve debugging için kullanılabilir
+   - Başarısız olsa bile Gateway kapanmıyor
+
+3. **Timeout Artırıldı:**
+   - 10 saniye → 15 saniye
+   - Basket.api'nin yavaş başlaması durumunda daha toleranslı
+
+**Sonuç:**
+- ✅ Gateway artık Docker Compose'da başarıyla başlıyor
+- ✅ Gateway'in `/health` endpoint'i her zaman healthy dönüyor (Gateway çalışıyorsa)
+- ✅ Downstream servislerin durumu `/health/downstream` endpoint'inden kontrol edilebilir
+- ✅ Circular dependency sorunu çözüldü
+
+**Ders:**
+- Gateway'in health check'i, downstream servislerin durumundan bağımsız olmalı
+- Gateway çalışıyorsa healthy sayılmalı (YARP routing çalışıyor demektir)
+- Downstream servislerin health check'leri ayrı endpoint'te olmalı (opsiyonel monitoring için)
+
+---
+
 ### ✅ Test Sonuçları Özeti
 
 | Test | Gateway Health Check | Downstream Servisler | Sonuç |
@@ -1242,13 +1332,30 @@ builder.Services.AddHealthChecks()
 - ✅ Monitoring Tools (Prometheus, Grafana)
 - ✅ Load Balancer
 
+### 4. Docker Compose Health Check Sorunu
+
+**Sorun:**
+Gateway'in health check'i downstream servislerin durumunu kontrol ediyordu. Basket.api yavaş başladığında Gateway'in health check'i başarısız oluyordu ve Docker Compose container'ı kapatıyordu.
+
+**Çözüm:**
+- Gateway'in `/health` endpoint'i artık sadece Gateway'in kendisini kontrol ediyor
+- Downstream servislerin health check'leri `/health/downstream` endpoint'ine taşındı
+- `Predicate = _ => false` ile Gateway'in kendi health check'i bypass ediliyor
+
+**Ders:**
+- Gateway'in health check'i, downstream servislerin durumundan bağımsız olmalı
+- Gateway çalışıyorsa healthy sayılmalı (YARP routing çalışıyor demektir)
+- Downstream servislerin health check'leri ayrı endpoint'te olmalı (opsiyonel monitoring için)
+- Circular dependency'lerden kaçınılmalı (Gateway, downstream servislerin healthy olmasını beklememeli)
+
 ---
 
 ## 🔗 İlgili Dosyalar
 
-- `src/ApiGateway/Gateway.API/Program.cs` (Health checks eklendi)
+- `src/ApiGateway/Gateway.API/Program.cs` (Health checks eklendi, Docker Compose sorunu çözüldü)
 - `src/Services/Ordering/Ordering.API/Program.cs` (RabbitMQ health check kaldırıldı)
 - `docs/architecture/eSho-AspController-Arc/documentation/done/faz-6-done/faz-6-1-ordering-api-projesi-olustur-note.md` (Ordering.API dokümantasyonu güncellendi)
+- `docs/architecture/eSho-AspController-Arc/documentation/doing/faz-8-doing/faz-8-docker-entegrasyonu.md` (Docker Compose sorun giderme bölümü güncellendi)
 
 ---
 
@@ -1270,6 +1377,7 @@ builder.Services.AddHealthChecks()
    - Health checks eklendi (Catalog, Basket, Ordering)
    - Gateway health check endpoint'i çalışıyor
    - Ordering.API health check sorunu çözüldü
+   - Docker Compose health check sorunu çözüldü (Gateway'in `/health` endpoint'i sadece Gateway'i kontrol ediyor)
 
 ### Sonuç:
 
@@ -1280,6 +1388,7 @@ builder.Services.AddHealthChecks()
 - ✅ Tüm servisler route'lanıyor
 - ✅ Health check'ler çalışıyor
 - ✅ Tüm servisler healthy durumda
+- ✅ Docker Compose'da Gateway başarıyla çalışıyor (health check sorunu çözüldü)
 
 **Sonraki Faz:** Faz 8 - Docker Entegrasyonu
 

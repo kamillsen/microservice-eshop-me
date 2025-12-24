@@ -990,6 +990,45 @@ docker-compose logs --tail=100 gateway.api
 - Path transform doğru mu? (`PathRemovePrefix`)
 - Downstream servisler çalışıyor mu?
 
+### Sorun: Gateway container başlamıyor / hemen kapanıyor
+**Hata:** 
+```
+gateway.api Exited (0) About a minute ago
+fail: Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService[103]
+      Health check basket-api with status Unhealthy completed after 10000ms
+```
+
+**Neden:**
+- Gateway'in `/health` endpoint'i tüm downstream servislerin health check'lerini kontrol ediyor
+- Basket.api yavaş başladığında Gateway'in health check'i başarısız oluyor
+- Docker Compose, Gateway'i unhealthy olarak işaretleyip container'ı kapatıyor
+
+**Çözüm:**
+Gateway'in `/health` endpoint'ini sadece Gateway'in kendisini kontrol edecek şekilde değiştirin:
+
+**Gateway.API/Program.cs:**
+```csharp
+// Gateway'in kendi health check'i (Docker Compose için)
+app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    // Sadece Gateway'in kendisini kontrol et (downstream servisler kritik değil)
+    Predicate = _ => false
+});
+
+// Downstream servislerin health check'leri (opsiyonel, monitoring için)
+app.MapHealthChecks("/health/downstream", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = check => check.Name.Contains("-api")
+});
+```
+
+**Açıklama:**
+- `/health` → Sadece Gateway'in durumunu kontrol eder (Docker Compose için)
+- `/health/downstream` → Downstream servislerin durumunu gösterir (monitoring için)
+- Gateway artık downstream servislerin durumundan bağımsız olarak çalışır
+
+**Detaylı bilgi için:** `docs/architecture/eSho-AspController-Arc/documentation/done/faz-7-done/faz-7-1-gateway-api-projesi-olustur-note.md` dosyasındaki "4. Docker Compose Health Check Sorunu ve Çözümü" bölümüne bakın.
+
 ### Sorun: RabbitMQ event akışı çalışmıyor
 **Hata:** Event consume edilmiyor
 **Çözüm:**

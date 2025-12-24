@@ -104,25 +104,25 @@ graph TB
     Basket --> BasketDb[("🗄️ PostgreSQL<br/>BasketDb<br/>(Source)")]
     Basket --> Redis[("⚡ Redis<br/>Cache")]
     
-    Basket -->|gRPC<br/>sync| Discount["💰 Discount Service<br/>(gRPC)<br/>Port: 5004"]
-    Discount --> DiscountDb[("🗄️ PostgreSQL<br/>DiscountDb")]
+    Discount["💰 Discount Service<br/>(gRPC)<br/>Port: 5004"] -.->|GetBasket: gRPC<br/>GetDiscount| Basket
+    DiscountDb[("🗄️ PostgreSQL<br/>DiscountDb")] --> Discount
     
-    Basket -->|RabbitMQ<br/>async| RabbitMQ["📨 RabbitMQ<br/>Message Broker"]
+    Basket -->|Checkout: RabbitMQ<br/>async| RabbitMQ["📨 RabbitMQ<br/>Message Broker"]
     RabbitMQ --> Ordering
     
     Ordering --> OrderingDb[("🗄️ PostgreSQL<br/>OrderingDb")]
     
-    style Gateway fill:#1565c0,color:#fff
-    style Catalog fill:#e65100,color:#fff
-    style Basket fill:#e65100,color:#fff
-    style Ordering fill:#e65100,color:#fff
-    style Discount fill:#e65100,color:#fff
-    style Redis fill:#c62828,color:#fff
-    style RabbitMQ fill:#6a1b9a,color:#fff
-    style CatalogDb fill:#2e7d32,color:#fff
-    style BasketDb fill:#2e7d32,color:#fff
-    style DiscountDb fill:#2e7d32,color:#fff
-    style OrderingDb fill:#2e7d32,color:#fff
+    classDef gatewayStyle fill:#1565c0,stroke:#0d47a1,stroke-width:2px,color:#fff
+    classDef apiStyle fill:#e65100,stroke:#bf360c,stroke-width:2px,color:#fff
+    classDef redisStyle fill:#c62828,stroke:#b71c1c,stroke-width:2px,color:#fff
+    classDef rabbitmqStyle fill:#6a1b9a,stroke:#4a148c,stroke-width:2px,color:#fff
+    classDef dbStyle fill:#2e7d32,stroke:#1b5e20,stroke-width:2px,color:#fff
+    
+    class Gateway gatewayStyle
+    class Catalog,Basket,Ordering,Discount apiStyle
+    class Redis redisStyle
+    class RabbitMQ rabbitmqStyle
+    class CatalogDb,BasketDb,DiscountDb,OrderingDb dbStyle
 ```
 
 ### Servisler Arası İletişim
