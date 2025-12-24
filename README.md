@@ -104,10 +104,10 @@ graph TB
     Basket --> BasketDb[("🗄️ PostgreSQL<br/>BasketDb<br/>(Source)")]
     Basket --> Redis[("⚡ Redis<br/>Cache")]
     
-    Basket -->|gRPC sync| Discount["💰 Discount Service<br/>(gRPC)<br/>Port: 5004"]
+    Basket -.->|GetBasket: gRPC<br/>GetDiscount| Discount["💰 Discount Service<br/>(gRPC)<br/>Port: 5004"]
     Discount --> DiscountDb[("🗄️ PostgreSQL<br/>DiscountDb")]
     
-    Basket -->|RabbitMQ async| RabbitMQ["📨 RabbitMQ<br/>Message Broker"]
+    Basket -->|Checkout: RabbitMQ<br/>async| RabbitMQ["📨 RabbitMQ<br/>Message Broker"]
     RabbitMQ --> Ordering
     
     Ordering --> OrderingDb[("🗄️ PostgreSQL<br/>OrderingDb")]
