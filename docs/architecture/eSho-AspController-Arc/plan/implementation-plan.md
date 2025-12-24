@@ -154,7 +154,7 @@
 - `MassTransit` (latest)
 - `MassTransit.RabbitMQ` (latest)
 - `AspNetCore.HealthChecks.NpgSql` (latest)
-- `AspNetCore.HealthChecks.RabbitMQ` (latest)
+- `AspNetCore.HealthChecks.RabbitMQ` (latest) - **NOT: Sonradan kaldırıldı** (ConnectionFactory.CreateConnection() metodu yok, MassTransit zaten RabbitMQ'yu yönetiyor)
 - `BuildingBlocks.Exceptions` (project reference)
 - `BuildingBlocks.Behaviors` (project reference)
 - `BuildingBlocks.Messaging` (project reference)
@@ -691,11 +691,11 @@ amqp://{username}:{password}@{hostname}:{port}
 - Health checks ekle (Redis + PostgreSQL)
 
 **Test:**
-- Swagger açılıyor mu? (http://localhost:5002/swagger)
+- Swagger açılıyor mu? (http://localhost:5278/swagger)
 - Endpoint'ler çalışıyor mu?
 - Health check çalışıyor mu?
 
-**Sonuç:** ✅ Basket Service çalışıyor (Port 5002)
+**Sonuç:** ✅ Basket Service çalışıyor (Port 5278 - launchSettings.json'da tanımlı)
 
 ---
 
@@ -793,7 +793,7 @@ amqp://{username}:{password}@{hostname}:{port}
 - `OrdersController` oluştur
 - Swagger konfigürasyonu
 - Exception middleware ekle
-- Health checks ekle (PostgreSQL + RabbitMQ)
+- Health checks ekle (PostgreSQL - RabbitMQ health check kaldırıldı)
 
 **Test:**
 - Swagger açılıyor mu? (http://localhost:5003/swagger)

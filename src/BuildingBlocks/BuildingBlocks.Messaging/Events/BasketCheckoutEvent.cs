@@ -5,6 +5,9 @@ public record BasketCheckoutEvent : IntegrationEvent
     public string UserName { get; init; } = default!;
     public decimal TotalPrice { get; init; }
     
+    // Basket Items
+    public List<BasketCheckoutItem> Items { get; init; } = new();
+    
     // Shipping Address
     public string FirstName { get; init; } = default!;
     public string LastName { get; init; } = default!;
@@ -20,5 +23,13 @@ public record BasketCheckoutEvent : IntegrationEvent
     public string Expiration { get; init; } = default!;
     public string CVV { get; init; } = default!;
     public int PaymentMethod { get; init; }
+}
+
+public record BasketCheckoutItem
+{
+    public Guid ProductId { get; init; }
+    public string ProductName { get; init; } = default!;
+    public int Quantity { get; init; }
+    public decimal Price { get; init; }
 }
 

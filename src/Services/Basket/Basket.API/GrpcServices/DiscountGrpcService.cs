@@ -33,13 +33,27 @@ public class DiscountGrpcService
         }
         catch (RpcException ex)
         {
-            _logger.LogError(ex, "Error getting discount for {ProductName}", productName);
+            _logger.LogWarning(ex, "Error getting discount for {ProductName}. StatusCode: {StatusCode}", 
+                productName, ex.StatusCode);
             
-            // İndirim yoksa null döndür (hata fırlatma)
-            if (ex.StatusCode == StatusCode.NotFound)
+            // İndirim yoksa veya servis çalışmıyorsa 0 döndür (hata fırlatma)
+            // NotFound = İndirim yok (normal durum)
+            // Internal, Unavailable, Unimplemented = Servis çalışmıyor (graceful degradation)
+            if (ex.StatusCode == StatusCode.NotFound || 
+                ex.StatusCode == StatusCode.Internal || 
+                ex.StatusCode == StatusCode.Unavailable ||
+                ex.StatusCode == StatusCode.Unimplemented)
+            {
                 return new CouponModel { Amount = 0 };
+            }
             
             throw;
+        }
+        catch (Exception ex)
+        {
+            // Diğer tüm exception'lar için de graceful degradation
+            _logger.LogWarning(ex, "Unexpected error getting discount for {ProductName}", productName);
+            return new CouponModel { Amount = 0 };
         }
     }
 }

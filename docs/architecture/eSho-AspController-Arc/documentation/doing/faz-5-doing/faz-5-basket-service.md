@@ -229,7 +229,8 @@ public class ShoppingCartItem
 {
     public Guid Id { get; set; }
     public Guid ShoppingCartId { get; set; }
-    public ShoppingCart ShoppingCart { get; set; } = default!;
+    // Navigation property yok - Referans projeye göre best practice (döngüsel referans sorunu olmaz)
+    
     public Guid ProductId { get; set; }
     public string ProductName { get; set; } = default!;
     public int Quantity { get; set; }
@@ -239,8 +240,10 @@ public class ShoppingCartItem
 
 **Açıklama:**
 - `ShoppingCart` → Sepet (Id, UserName, Items navigation property, TotalPrice calculated property)
-- `ShoppingCartItem` → Sepet item'ı (Id, ShoppingCartId FK, ShoppingCart navigation, ProductId, ProductName, Quantity, Price)
+- `ShoppingCartItem` → Sepet item'ı (Id, ShoppingCartId FK, **Navigation property YOK** - best practice, ProductId, ProductName, Quantity, Price)
 - `TotalPrice` → Calculated property (Items'ların toplamı)
+- **Önemli:** `ShoppingCart` navigation property **YOK** (best practice - döngüsel referans sorunu olmaz)
+- EF Core relationship `BasketDbContext.OnModelCreating` içinde `.WithOne()` ile tanımlanır (navigation property olmadan)
 
 **Neden calculated property?**
 - PostgreSQL'de sadece Items tutulur
@@ -343,8 +346,9 @@ public class BasketDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.UserName).IsUnique();
+            // Navigation property olmadan relationship tanımı (best practice - döngüsel referans yok)
             entity.HasMany(e => e.Items)
-                .WithOne(e => e.ShoppingCart)
+                .WithOne() // Navigation property yok
                 .HasForeignKey(e => e.ShoppingCartId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
@@ -440,24 +444,41 @@ public class BasketRepository : IBasketRepository
         }
         else
         {
-            _context.ShoppingCartItems.RemoveRange(existing.Items);
-            basket.Items.ForEach(item =>
+            // Mevcut item'ları sil (ExecuteDelete - direkt SQL DELETE, tracking sorunu yok)
+            await _context.ShoppingCartItems
+                .Where(x => x.ShoppingCartId == existing.Id)
+                .ExecuteDeleteAsync();
+            
+            // Yeni item'ları ekle (AutoMapper kullan - DRY prensibi, maintenance kolay)
+            var newItems = basket.Items.Select(item =>
             {
-                item.Id = Guid.NewGuid();
-                item.ShoppingCartId = existing.Id;
-            });
-            existing.Items = basket.Items;
-            _context.ShoppingCarts.Update(existing);
+                var entity = _mapper.Map<ShoppingCartItem>(item);
+                entity.Id = Guid.NewGuid();
+                entity.ShoppingCartId = existing.Id;
+                return entity;
+            }).ToList();
+            
+            _context.ShoppingCartItems.AddRange(newItems);
         }
 
         await _context.SaveChangesAsync();
 
-        // 2. Redis'e yaz (cache)
+        // 2. Redis'e yaz (cache) - SaveChanges sonrası existing'i yeniden yükle (Items için)
         try
         {
-            var savedBasket = existing ?? basket;
+            ShoppingCart savedBasket;
+            if (existing != null)
+            {
+                // ExecuteDelete sonrası existing.Items boş olabilir, yeniden yükle
+                savedBasket = await ReloadBasketWithItems(existing.Id) ?? existing;
+            }
+            else
+            {
+                savedBasket = basket;
+            }
+            
             var json = JsonSerializer.Serialize(savedBasket);
-            await _redis.StringSetAsync($"basket:{basket.UserName}", json, TimeSpan.FromHours(24));
+            await _redis.StringSetAsync(GetRedisKey(basket.UserName), json, CacheExpiration);
             _logger.LogInformation("Basket saved to database and cached for {UserName}", basket.UserName);
         }
         catch (RedisConnectionException ex)
@@ -465,8 +486,28 @@ public class BasketRepository : IBasketRepository
             _logger.LogWarning(ex, "Redis unavailable, basket saved to database only for {UserName}", basket.UserName);
         }
 
-        return existing ?? basket;
+        // Return için de existing'i yeniden yükle
+        if (existing != null)
+        {
+            return await ReloadBasketWithItems(existing.Id) ?? existing;
+        }
+        
+        return basket;
     }
+    
+    // Helper methods (DRY prensibi)
+    private string GetRedisKey(string userName) => $"{RedisKeyPrefix}{userName}";
+    
+    private async Task<ShoppingCart?> ReloadBasketWithItems(Guid basketId)
+    {
+        return await _context.ShoppingCarts
+            .Include(x => x.Items)
+            .FirstOrDefaultAsync(x => x.Id == basketId);
+    }
+    
+    // Constants (DRY prensibi)
+    private const string RedisKeyPrefix = "basket:";
+    private static readonly TimeSpan CacheExpiration = TimeSpan.FromHours(24);
 
     public async Task<bool> DeleteBasket(string userName)
     {
@@ -509,9 +550,17 @@ public class BasketRepository : IBasketRepository
 - **PostgreSQL = Source of Truth:** Gerçek veri kaynağı
 - **Redis = Cache:** Hız için
 
+**Önemli İyileştirmeler (Best Practices):**
+- **ExecuteDeleteAsync()**: EF Core 7+ özelliği, direkt SQL DELETE çalıştırır (tracking sorunu yok, daha performanslı)
+- **AddRange()**: Toplu ekleme, daha performanslı
+- **AutoMapper**: Manuel mapping yerine AutoMapper kullanımı (DRY prensibi, maintenance kolay)
+- **Helper Methods**: `GetRedisKey()` ve `ReloadBasketWithItems()` - kod tekrarını önler (DRY)
+- **Constants**: `RedisKeyPrefix` ve `CacheExpiration` - magic string/values yerine constant kullanımı (DRY)
+- **ReloadBasketWithItems()**: `ExecuteDeleteAsync()` sonrası `existing.Items` boş olabileceği için yeniden yükleme
+
 **Önemli Noktalar:**
 - JSON serialize/deserialize → Redis string olarak tutar
-- Key naming: `basket:{userName}` → Her kullanıcı için ayrı key
+- Key naming: `basket:{userName}` → Her kullanıcı için ayrı key (helper method ile)
 - Null check → GetBasket null dönebilir (sepet yoksa)
 - EF Core Include → Navigation property'leri yükler
 
@@ -1169,11 +1218,7 @@ builder.Services.AddMassTransit(config =>
 {
     config.UsingRabbitMq((context, cfg) =>
     {
-        cfg.Host(builder.Configuration["MessageBroker:Host"], "/", h =>
-        {
-            h.Username("guest");
-            h.Password("guest");
-        });
+        cfg.Host(builder.Configuration["MessageBroker:Host"]);
     });
 });
 ```
@@ -1324,16 +1369,16 @@ if (app.Environment.IsDevelopment())
 ```
 
 ### Test:
-- Swagger açılıyor mu? (http://localhost:5002/swagger)
+- Swagger açılıyor mu? (http://localhost:5278/swagger)
 - Endpoint'ler çalışıyor mu?
   - `GET /api/baskets/user1` → Sepeti getirir
   - `POST /api/baskets` → Sepeti kaydeder
   - `DELETE /api/baskets/user1` → Sepeti siler
   - `POST /api/baskets/checkout` → Checkout yapar
-- Health check çalışıyor mu? (http://localhost:5002/health)
+- Health check çalışıyor mu? (http://localhost:5278/health)
 - Checkout event RabbitMQ'ya gidiyor mu? (RabbitMQ Management UI'da kontrol et)
 
-**Sonuç:** ✅ Basket Service çalışıyor (Port 5002)
+**Sonuç:** ✅ Basket Service çalışıyor (Port 5278 - launchSettings.json'da tanımlı)
 
 ---
 

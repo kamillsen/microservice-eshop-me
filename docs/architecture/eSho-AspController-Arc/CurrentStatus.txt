@@ -1,9 +1,0 @@
-=> 1.Faz
-    -1.Faz için version-1 tamamlandı.
-    -1.Faz doing-done için md dosyaları eklendi.
-    -2.Faz için doing dosyası yazıldı. 
-    -2.Fazdayım.
-
-=> 2.Faz
-    -2.Faz için version-2.0 'a geçildi.
-    -2.Faz için doing dosyası hazır.

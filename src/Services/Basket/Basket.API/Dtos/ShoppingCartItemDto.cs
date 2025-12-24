@@ -8,3 +8,5 @@ public class ShoppingCartItemDto
     public decimal Price { get; set; }
 }
 
+
+

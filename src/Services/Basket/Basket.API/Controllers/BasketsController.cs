@@ -19,6 +19,9 @@ public class BasketsController : ControllerBase
         _mediator = mediator;
     }
 
+    /// <summary>
+    /// GET /api/baskets/{userName} - Kullanıcı adına göre sepet bilgilerini getirir.
+    /// </summary>
     [HttpGet("{userName}")]
     [ProducesResponseType(typeof(ShoppingCartDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<ShoppingCartDto>> GetBasket(string userName)
@@ -27,6 +30,9 @@ public class BasketsController : ControllerBase
         return Ok(basket);
     }
 
+    /// <summary>
+    /// POST /api/baskets - Yeni bir sepet kaydeder veya mevcut sepeti günceller.
+    /// </summary>
     [HttpPost]
     [ProducesResponseType(typeof(ShoppingCartDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<ShoppingCartDto>> StoreBasket([FromBody] ShoppingCartDto basket)
@@ -35,6 +41,9 @@ public class BasketsController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// DELETE /api/baskets/{userName} - Kullanıcı adına göre sepeti siler.
+    /// </summary>
     [HttpDelete("{userName}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> DeleteBasket(string userName)
@@ -46,6 +55,9 @@ public class BasketsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// POST /api/baskets/checkout - Sepeti ödeme işlemine gönderir ve sipariş oluşturur.
+    /// </summary>
     [HttpPost("checkout")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

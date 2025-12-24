@@ -411,12 +411,20 @@ namespace Basket.API.Entities;
 
 public class ShoppingCartItem
 {
+    public Guid Id { get; set; }
+    public Guid ShoppingCartId { get; set; }
+    // Navigation property yok - Referans projeye göre best practice (döngüsel referans sorunu olmaz)
+    
     public Guid ProductId { get; set; }
     public string ProductName { get; set; } = default!;
     public int Quantity { get; set; }
     public decimal Price { get; set; }
 }
 ```
+
+**Önemli Not:**
+- `ShoppingCart` navigation property **YOK** (best practice - döngüsel referans sorunu olmaz)
+- EF Core relationship `BasketDbContext.OnModelCreating` içinde `.WithOne()` ile tanımlanır (navigation property olmadan)
 
 **Açıklamalar:**
 - `ShoppingCart` → Sepet (UserName key, Items listesi, TotalPrice hesaplanan property)
@@ -644,6 +652,7 @@ dotnet build src/Services/Basket/Basket.API/Basket.API.csproj
 **Kod:**
 ```csharp
 using System.Text.Json;
+using AutoMapper;
 using Basket.API.Entities;
 using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
@@ -652,18 +661,33 @@ namespace Basket.API.Data;
 
 public class BasketRepository : IBasketRepository
 {
+    private const string RedisKeyPrefix = "basket:";
+    private static readonly TimeSpan CacheExpiration = TimeSpan.FromHours(24);
+    
     private readonly IDatabase _redis;
     private readonly BasketDbContext _context;
     private readonly ILogger<BasketRepository> _logger;
+    private readonly IMapper _mapper;
 
     public BasketRepository(
         IConnectionMultiplexer redis,
         BasketDbContext context,
-        ILogger<BasketRepository> logger)
+        ILogger<BasketRepository> logger,
+        IMapper mapper)
     {
         _redis = redis.GetDatabase();
         _context = context;
         _logger = logger;
+        _mapper = mapper;
+    }
+    
+    private string GetRedisKey(string userName) => $"{RedisKeyPrefix}{userName}";
+    
+    private async Task<ShoppingCart?> ReloadBasketWithItems(Guid basketId)
+    {
+        return await _context.ShoppingCarts
+            .Include(x => x.Items)
+            .FirstOrDefaultAsync(x => x.Id == basketId);
     }
 
     // ... metodlar (Cache-aside pattern)
@@ -672,8 +696,11 @@ public class BasketRepository : IBasketRepository
 
 **Önemli Değişiklikler:**
 - `BasketDbContext` dependency eklendi (PostgreSQL için)
+- `IMapper` dependency eklendi (AutoMapper - DRY prensibi için)
 - `_redis` ve `_context` field'ları var
 - Cache-aside pattern implementasyonu
+- **Helper methods**: `GetRedisKey()` ve `ReloadBasketWithItems()` (DRY prensibi)
+- **Constants**: `RedisKeyPrefix` ve `CacheExpiration` (DRY prensibi)
 
 ### IConnectionMultiplexer Nedir?
 
@@ -824,6 +851,8 @@ GetBasket("user2")
 
 ### SaveBasket Metodu (Cache-aside Pattern)
 
+**Not:** Bu metod EF Core 7+ best practice'lerini kullanır: `ExecuteDeleteAsync()` ve `AddRange()`, ayrıca AutoMapper ile DRY prensibine uygun.
+
 ```csharp
 public async Task<ShoppingCart> SaveBasket(ShoppingCart basket)
 {
@@ -840,26 +869,41 @@ public async Task<ShoppingCart> SaveBasket(ShoppingCart basket)
     }
     else
     {
-        // Mevcut item'ları sil
-        _context.ShoppingCartItems.RemoveRange(existing.Items);
-        // Yeni item'ları ekle
-        basket.Items.ForEach(item =>
+        // Mevcut item'ları sil (ExecuteDelete - direkt SQL DELETE, tracking sorunu yok)
+        await _context.ShoppingCartItems
+            .Where(x => x.ShoppingCartId == existing.Id)
+            .ExecuteDeleteAsync();
+        
+        // Yeni item'ları ekle (AutoMapper kullan - DRY prensibi, maintenance kolay)
+        var newItems = basket.Items.Select(item =>
         {
-            item.Id = Guid.NewGuid();
-            item.ShoppingCartId = existing.Id;
-        });
-        existing.Items = basket.Items;
-        _context.ShoppingCarts.Update(existing);
+            var entity = _mapper.Map<ShoppingCartItem>(item);
+            entity.Id = Guid.NewGuid();
+            entity.ShoppingCartId = existing.Id;
+            return entity;
+        }).ToList();
+        
+        _context.ShoppingCartItems.AddRange(newItems);
     }
 
     await _context.SaveChangesAsync();
 
-    // 2. Redis'e yaz (cache)
+    // 2. Redis'e yaz (cache) - SaveChanges sonrası existing'i yeniden yükle (Items için)
     try
     {
-        var savedBasket = existing ?? basket;
+        ShoppingCart savedBasket;
+        if (existing != null)
+        {
+            // ExecuteDelete sonrası existing.Items boş olabilir, yeniden yükle
+            savedBasket = await ReloadBasketWithItems(existing.Id) ?? existing;
+        }
+        else
+        {
+            savedBasket = basket;
+        }
+        
         var json = JsonSerializer.Serialize(savedBasket);
-        await _redis.StringSetAsync($"basket:{basket.UserName}", json, TimeSpan.FromHours(24));
+        await _redis.StringSetAsync(GetRedisKey(basket.UserName), json, CacheExpiration);
         _logger.LogInformation("Basket saved to database and cached for {UserName}", basket.UserName);
     }
     catch (RedisConnectionException ex)
@@ -868,9 +912,37 @@ public async Task<ShoppingCart> SaveBasket(ShoppingCart basket)
         _logger.LogWarning(ex, "Redis unavailable, basket saved to database only for {UserName}", basket.UserName);
     }
 
-    return existing ?? basket;
+    // Return için de existing'i yeniden yükle
+    if (existing != null)
+    {
+        return await ReloadBasketWithItems(existing.Id) ?? existing;
+    }
+    
+    return basket;
 }
+
+// Helper methods (DRY prensibi)
+private string GetRedisKey(string userName) => $"{RedisKeyPrefix}{userName}";
+
+private async Task<ShoppingCart?> ReloadBasketWithItems(Guid basketId)
+{
+    return await _context.ShoppingCarts
+        .Include(x => x.Items)
+        .FirstOrDefaultAsync(x => x.Id == basketId);
+}
+
+// Constants (DRY prensibi)
+private const string RedisKeyPrefix = "basket:";
+private static readonly TimeSpan CacheExpiration = TimeSpan.FromHours(24);
 ```
+
+**Önemli İyileştirmeler:**
+- **ExecuteDeleteAsync()**: EF Core 7+ özelliği, direkt SQL DELETE çalıştırır (tracking sorunu yok, daha performanslı)
+- **AddRange()**: Toplu ekleme, daha performanslı
+- **AutoMapper**: Manuel mapping yerine AutoMapper kullanımı (DRY prensibi, maintenance kolay)
+- **Helper Methods**: `GetRedisKey()` ve `ReloadBasketWithItems()` - kod tekrarını önler (DRY)
+- **Constants**: `RedisKeyPrefix` ve `CacheExpiration` - magic string/values yerine constant kullanımı (DRY)
+- **ReloadBasketWithItems()**: `ExecuteDeleteAsync()` sonrası `existing.Items` boş olabileceği için yeniden yükleme
 
 **Adım adım ne yapıyor? (Cache-aside Pattern)**
 
@@ -2037,6 +2109,10 @@ dotnet build src/Services/Basket/Basket.API/Basket.API.csproj
 
 **Klasör:** `Features/Basket/Queries/GetBasket/`
 
+> **📌 ÖNEMLİ: Handler'lar Ne Zaman Çalışır?**
+> 
+> Bu bölümde handler'ların ne zaman çalıştığını ve hangi işlem sırasında kullanıldığını öğreneceksiniz. Bu bilgiler, handler'ların pratik kullanım senaryolarını anlamanıza yardımcı olacaktır.
+
 ### GetBasketQuery.cs
 
 **Dosya:** `Features/Basket/Queries/GetBasket/GetBasketQuery.cs`
@@ -2058,6 +2134,30 @@ dotnet build src/Services/Basket/Basket.API/Basket.API.csproj
 **Dosya:** `Features/Basket/Queries/GetBasket/GetBasketHandler.cs`
 
 **Ne işe yarar:** GetBasketQuery'yi işler (Redis'ten sepeti alır, indirim hesaplar)
+
+**NE ZAMAN ÇALIŞIR:**
+- Kullanıcı sepete bakmak istediğinde
+- Sepet sayfası yüklendiğinde
+- Frontend: `GET /api/baskets/{userName}` endpoint'i çağrıldığında
+- Kullanıcı "Sepetimi Göster" butonuna bastığında
+- Sepet özeti gösterilirken
+
+**HANGİ İŞLEM SIRASINDA KULLANILIR:**
+- **Sepet görüntüleme işlemi:** Kullanıcı sepete bakmak istediğinde
+- **Sepet özeti:** Checkout sayfasında sepet özeti gösterilirken
+- **Sepet güncelleme sonrası:** Ürün eklendikten sonra güncel sepeti göstermek için
+- **İndirim hesaplama:** Her ürün için Discount gRPC servisinden indirim sorgulanır
+
+**Tipik Kullanıcı Akışı:**
+```
+1. Kullanıcı sepete bakmak ister
+   ↓
+2. Frontend: GET /api/baskets/{userName} çağrılır
+   ↓
+3. GetBasketHandler çalışır
+   ↓
+4. Sepet + İndirimler gösterilir
+```
 
 **Dependencies:**
 - `IBasketRepository` → Redis'ten sepeti almak için
@@ -2101,6 +2201,11 @@ dotnet build src/Services/Basket/Basket.API/Basket.API.csproj
 - İndirim hesaplama → Her item için ayrı sorgu (gRPC hızlı)
 - TotalPrice → Basket.TotalPrice - Discount
 
+**Handler'lar Arası İlişki:**
+- GetBasketHandler → Sadece okuma yapar (Query), veri değiştirmez
+- StoreBasketHandler → Sepet kaydedilirken kullanılır, sonra GetBasketHandler ile görüntülenir
+- CheckoutBasketHandler → Sipariş tamamlanırken kullanılır, sonra sepet silinir
+
 **Sonuç:**
 - `Features/Basket/Queries/GetBasket/GetBasketQuery.cs` oluşturuldu
 - `Features/Basket/Queries/GetBasket/GetBasketHandler.cs` oluşturuldu
@@ -2110,6 +2215,10 @@ dotnet build src/Services/Basket/Basket.API/Basket.API.csproj
 ## Adım 5: StoreBasketCommand + StoreBasketHandler + StoreBasketValidator
 
 **Klasör:** `Features/Basket/Commands/StoreBasket/`
+
+> **📌 ÖNEMLİ: Handler'lar Ne Zaman Çalışır?**
+> 
+> StoreBasketHandler, kullanıcı sepete ürün eklediğinde veya sepeti güncellediğinde çalışır. Bu handler, sepet verilerini hem PostgreSQL'e (source of truth) hem Redis'e (cache) kaydeder.
 
 ### StoreBasketCommand.cs
 
@@ -2160,6 +2269,33 @@ Hata yoksa → Handler'a geçer
 
 **Ne işe yarar:** StoreBasketCommand'yi işler (Redis'e sepeti kaydeder)
 
+**NE ZAMAN ÇALIŞIR:**
+- Kullanıcı sepete ürün eklediğinde
+- Sepetteki ürün miktarını değiştirdiğinde
+- Sepet güncellendiğinde
+- Frontend: `POST /api/baskets` endpoint'i çağrıldığında
+- Kullanıcı "Sepete Ekle" butonuna bastığında
+- Ürün miktarı değiştirildiğinde
+
+**HANGİ İŞLEM SIRASINDA KULLANILIR:**
+- **Sepete ürün ekleme:** Yeni ürün sepete eklendiğinde
+- **Sepet güncelleme:** Mevcut ürünün miktarı değiştirildiğinde
+- **Sepet senkronizasyonu:** Frontend'den sepet verisi gönderildiğinde
+- **Sepet kaydetme:** Sepet hem PostgreSQL'e (source of truth) hem Redis'e (cache) kaydedilir
+
+**Tipik Kullanıcı Akışı:**
+```
+1. Kullanıcı ürün ekler
+   ↓
+2. Frontend: POST /api/baskets çağrılır
+   ↓
+3. StoreBasketHandler çalışır
+   ↓
+4. Sepet kaydedilir (PostgreSQL + Redis)
+   ↓
+5. Güncel sepet döner
+```
+
 **Dependencies:**
 - `IBasketRepository` → Redis'e kaydetmek için
 - `IMapper` → DTO ↔ Entity mapping için
@@ -2183,6 +2319,11 @@ Hata yoksa → Handler'a geçer
    var basketDto = _mapper.Map<ShoppingCartDto>(savedBasket);
    ```
 
+**Handler'lar Arası İlişki:**
+- StoreBasketHandler → Sepet kaydedilir/güncellenir (Command), veri değiştirir
+- GetBasketHandler → Kaydedilen sepet görüntülenirken kullanılır
+- CheckoutBasketHandler → Sepet checkout edilirken kullanılır
+
 **Sonuç:**
 - `Features/Basket/Commands/StoreBasket/StoreBasketCommand.cs` oluşturuldu
 - `Features/Basket/Commands/StoreBasket/StoreBasketHandler.cs` oluşturuldu
@@ -2193,6 +2334,10 @@ Hata yoksa → Handler'a geçer
 ## Adım 6: DeleteBasketCommand + DeleteBasketHandler
 
 **Klasör:** `Features/Basket/Commands/DeleteBasket/`
+
+> **📌 ÖNEMLİ: Handler'lar Ne Zaman Çalışır?**
+> 
+> DeleteBasketHandler, kullanıcı sepeti manuel olarak silmek istediğinde çalışır. CheckoutBasketHandler içinde de sepet silinir, ama bu handler manuel silme için kullanılır.
 
 ### DeleteBasketCommand.cs
 
@@ -2210,6 +2355,28 @@ Hata yoksa → Handler'a geçer
 **Dosya:** `Features/Basket/Commands/DeleteBasket/DeleteBasketHandler.cs`
 
 **Ne işe yarar:** DeleteBasketCommand'yi işler (Redis'ten sepeti siler)
+
+**NE ZAMAN ÇALIŞIR:**
+- Kullanıcı sepeti manuel olarak silmek istediğinde
+- Admin panelinden sepet silindiğinde
+- Frontend: `DELETE /api/baskets/{userName}` endpoint'i çağrıldığında
+- Kullanıcı "Sepeti Temizle" butonuna bastığında
+
+**HANGİ İŞLEM SIRASINDA KULLANILIR:**
+- **Manuel sepet silme:** Kullanıcı sepeti temizlemek istediğinde
+- **Admin işlemleri:** Admin panelinden sepet silindiğinde
+- **NOT:** CheckoutBasketHandler içinde de sepet silinir, ama bu handler manuel silme için
+
+**Tipik Kullanıcı Akışı:**
+```
+1. Kullanıcı sepeti temizlemek ister
+   ↓
+2. Frontend: DELETE /api/baskets/{userName} çağrılır
+   ↓
+3. DeleteBasketHandler çalışır
+   ↓
+4. Sepet silinir (PostgreSQL + Redis)
+```
 
 **Dependencies:**
 - `IBasketRepository` → Redis'ten silmek için
@@ -2231,6 +2398,11 @@ Hata yoksa → Handler'a geçer
    return deleted;  // true veya false
    ```
 
+**Handler'lar Arası İlişki:**
+- DeleteBasketHandler → Manuel sepet silme için kullanılır
+- CheckoutBasketHandler → Checkout sonrası sepet silinir (otomatik)
+- GetBasketHandler → Silinen sepet görüntülenemez (boş sepet döner)
+
 **Sonuç:**
 - `Features/Basket/Commands/DeleteBasket/DeleteBasketCommand.cs` oluşturuldu
 - `Features/Basket/Commands/DeleteBasket/DeleteBasketHandler.cs` oluşturuldu
@@ -2240,6 +2412,10 @@ Hata yoksa → Handler'a geçer
 ## Adım 7: CheckoutBasketCommand + CheckoutBasketHandler + CheckoutBasketValidator
 
 **Klasör:** `Features/Basket/Commands/CheckoutBasket/`
+
+> **📌 ÖNEMLİ: Handler'lar Ne Zaman Çalışır?**
+> 
+> CheckoutBasketHandler, kullanıcı "Siparişi Tamamla" butonuna bastığında çalışır. Bu handler, RabbitMQ'ya event gönderir (Ordering Service bu event'i dinler ve sipariş oluşturur) ve sepeti siler. Bu, microservice mimarisinde event-driven pattern kullanımının önemli bir örneğidir.
 
 ### CheckoutBasketCommand.cs
 
@@ -2272,6 +2448,38 @@ Hata yoksa → Handler'a geçer
 **Dosya:** `Features/Basket/Commands/CheckoutBasket/CheckoutBasketHandler.cs`
 
 **Ne işe yarar:** CheckoutBasketCommand'yi işler (RabbitMQ'ya event gönderir, sepeti siler)
+
+**NE ZAMAN ÇALIŞIR:**
+- Kullanıcı "Siparişi Tamamla" butonuna bastığında
+- Ödeme sayfasında sipariş onaylandığında
+- Frontend: `POST /api/baskets/checkout` endpoint'i çağrıldığında
+- Sipariş işlemi başlatıldığında
+
+**HANGİ İŞLEM SIRASINDA KULLANILIR:**
+- **Sipariş tamamlama:** Kullanıcı siparişi onayladığında
+- **Event publishing:** RabbitMQ'ya BasketCheckoutEvent gönderilir (Ordering Service bu event'i dinler ve sipariş oluşturur)
+- **Sepet temizleme:** Checkout tamamlandığı için sepet silinir
+- **Microservice iletişimi:** Basket Service, Ordering Service'e event gönderir (loosely coupled)
+
+**Tipik Kullanıcı Akışı:**
+```
+1. Kullanıcı "Siparişi Tamamla" der
+   ↓
+2. Frontend: POST /api/baskets/checkout çağrılır
+   ↓
+3. CheckoutBasketHandler çalışır
+   ↓
+4. Event RabbitMQ'ya gönderilir (Ordering Service dinler)
+   ↓
+5. Sepet silinir
+   ↓
+6. Ordering Service event'i alır ve sipariş oluşturur
+```
+
+**ÖNEMLİ NOTLAR:**
+- RabbitMQ'ya event gönderilir → Ordering Service bu event'i dinler ve sipariş oluşturur
+- Sepet silinir → Checkout tamamlandığı için sepet artık gerekli değil
+- Event-driven pattern → Microservice mimarisinde servisler arası iletişim için kullanılır
 
 **Dependencies:**
 - `IBasketRepository` → Sepeti almak ve silmek için
@@ -2314,6 +2522,31 @@ Hata yoksa → Handler'a geçer
 - TotalPrice → Basket'ten alınır (command'de yok)
 - Sepet silinir → Checkout sonrası sepet temizlenir
 
+**Handler'lar Arası İlişki:**
+- CheckoutBasketHandler → Sipariş tamamlanırken kullanılır (Command), RabbitMQ'ya event gönderir
+- GetBasketHandler → Checkout öncesi sepet görüntülenirken kullanılır
+- StoreBasketHandler → Checkout öncesi sepet güncellenirken kullanılır
+- DeleteBasketHandler → Checkout sonrası sepet silinir (CheckoutBasketHandler içinde)
+
+**Tipik E-ticaret Alışveriş Akışı:**
+```
+1. Kullanıcı ürün ekler
+   ↓ StoreBasketHandler çalışır (sepet kaydedilir)
+
+2. Kullanıcı sepete bakar
+   ↓ GetBasketHandler çalışır (sepet + indirimler gösterilir)
+
+3. Kullanıcı tekrar ürün ekler
+   ↓ StoreBasketHandler çalışır (sepet güncellenir)
+
+4. Kullanıcı sepete tekrar bakar
+   ↓ GetBasketHandler çalışır (güncel sepet gösterilir)
+
+5. Kullanıcı "Siparişi Tamamla" der
+   ↓ CheckoutBasketHandler çalışır (event gönderilir, sepet silinir)
+   ↓ RabbitMQ → Ordering Service event'i alır ve sipariş oluşturur
+```
+
 **Sonuç:**
 - `Features/Basket/Commands/CheckoutBasket/CheckoutBasketCommand.cs` oluşturuldu
 - `Features/Basket/Commands/CheckoutBasket/CheckoutBasketHandler.cs` oluşturuldu
@@ -2334,11 +2567,7 @@ builder.Services.AddMassTransit(config =>
 {
     config.UsingRabbitMq((context, cfg) =>
     {
-        cfg.Host(builder.Configuration["MessageBroker:Host"], "/", h =>
-        {
-            h.Username("guest");
-            h.Password("guest");
-        });
+        cfg.Host(builder.Configuration["MessageBroker:Host"]);
     });
 });
 ```
@@ -2424,6 +2653,57 @@ Uygulama kapanınca → Bağlantı kapanır
 dotnet build src/Services/Basket/Basket.API/Basket.API.csproj
 # Build başarılı olmalı (0 hata, 0 uyarı)
 ```
+
+---
+
+## Handler'lar Ne Zaman Çalışır? - Özet Tablo
+
+| Handler | Ne Zaman Çalışır | Hangi İşlem | Sıklık | Veri Değişikliği |
+|---------|------------------|-------------|--------|------------------|
+| **GetBasketHandler** | Sepet görüntülenirken | Okuma (Query) | Çok sık | ❌ Hayır |
+| **StoreBasketHandler** | Ürün ekleme/güncelleme | Yazma (Command) | Sık | ✅ Evet |
+| **DeleteBasketHandler** | Manuel sepet silme | Yazma (Command) | Az | ✅ Evet |
+| **CheckoutBasketHandler** | Sipariş tamamlanırken | Yazma + Event (Command) | Az | ✅ Evet |
+
+### Handler'lar Arası İlişkiler:
+
+```
+Kullanıcı Sepete Ürün Ekler
+    ↓
+StoreBasketHandler (sepet kaydedilir)
+    ↓
+Kullanıcı Sepete Bakar
+    ↓
+GetBasketHandler (sepet + indirimler gösterilir)
+    ↓
+Kullanıcı Siparişi Tamamlar
+    ↓
+CheckoutBasketHandler (event gönderilir, sepet silinir)
+    ↓
+RabbitMQ → Ordering Service (sipariş oluşturulur)
+```
+
+### Önemli Notlar:
+
+1. **GetBasketHandler (Query):**
+   - Sadece okuma yapar, veri değiştirmez
+   - Her sepet görüntüleme işleminde çalışır
+   - İndirim hesaplama yapar (gRPC ile)
+
+2. **StoreBasketHandler (Command):**
+   - Veri değiştirir (sepet kaydedilir/güncellenir)
+   - Hem PostgreSQL'e hem Redis'e yazar
+   - Ürün ekleme/güncelleme işlemlerinde çalışır
+
+3. **CheckoutBasketHandler (Command):**
+   - Veri değiştirir (sepet silinir)
+   - RabbitMQ'ya event gönderir (Ordering Service için)
+   - Sipariş tamamlama işleminde çalışır
+
+4. **DeleteBasketHandler (Command):**
+   - Veri değiştirir (sepet silinir)
+   - Manuel sepet silme için kullanılır
+   - CheckoutBasketHandler içinde de sepet silinir
 
 ---
 
@@ -2594,6 +2874,14 @@ public class BasketsController : ControllerBase
 - `GetBasketQuery` oluşturur ve MediatR'a gönderir
 - `ShoppingCartDto` döner
 
+**NE ZAMAN ÇALIŞIR:**
+- Kullanıcı sepete bakmak istediğinde
+- Sepet sayfası yüklendiğinde
+- Frontend: `GET /api/baskets/{userName}` endpoint'i çağrıldığında
+
+**HANGİ HANDLER ÇALIŞIR:**
+- `GetBasketHandler` → Sepeti Redis'ten alır, indirim hesaplar, DTO'ya map eder
+
 **Response:**
 - `200 OK` → Sepet bulundu
 - `200 OK` (boş sepet) → Sepet yoksa boş sepet döner
@@ -2619,6 +2907,15 @@ public async Task<ActionResult<ShoppingCartDto>> GetBasket(string userName)
 - `StoreBasketCommand` oluşturur ve MediatR'a gönderir
 - `ShoppingCartDto` döner
 
+**NE ZAMAN ÇALIŞIR:**
+- Kullanıcı sepete ürün eklediğinde
+- Sepetteki ürün miktarını değiştirdiğinde
+- Sepet güncellendiğinde
+- Frontend: `POST /api/baskets` endpoint'i çağrıldığında
+
+**HANGİ HANDLER ÇALIŞIR:**
+- `StoreBasketHandler` → Sepeti PostgreSQL'e kaydeder, Redis'e cache'ler
+
 **Response:**
 - `200 OK` → Sepet kaydedildi/güncellendi
 - `400 Bad Request` → Validation hatası (FluentValidation)
@@ -2642,6 +2939,14 @@ public async Task<ActionResult<ShoppingCartDto>> StoreBasket([FromBody] Shopping
 - `DELETE /api/baskets/{userName}` → Sepeti siler
 - `DeleteBasketCommand` oluşturur ve MediatR'a gönderir
 - `bool` döner (başarılı/başarısız)
+
+**NE ZAMAN ÇALIŞIR:**
+- Kullanıcı sepeti manuel olarak silmek istediğinde
+- Admin panelinden sepet silindiğinde
+- Frontend: `DELETE /api/baskets/{userName}` endpoint'i çağrıldığında
+
+**HANGİ HANDLER ÇALIŞIR:**
+- `DeleteBasketHandler` → Sepeti PostgreSQL'den ve Redis'ten siler
 
 **Response:**
 - `204 No Content` → Sepet silindi
@@ -2670,6 +2975,18 @@ public async Task<IActionResult> DeleteBasket(string userName)
 - Request body'den `CheckoutBasketCommand` alır
 - MediatR'a gönderir
 - `bool` döner (başarılı/başarısız)
+
+**NE ZAMAN ÇALIŞIR:**
+- Kullanıcı "Siparişi Tamamla" butonuna bastığında
+- Ödeme sayfasında sipariş onaylandığında
+- Frontend: `POST /api/baskets/checkout` endpoint'i çağrıldığında
+
+**HANGİ HANDLER ÇALIŞIR:**
+- `CheckoutBasketHandler` → RabbitMQ'ya event gönderir (Ordering Service için), sepeti siler
+
+**ÖNEMLİ NOT:**
+- RabbitMQ'ya event gönderilir → Ordering Service bu event'i dinler ve sipariş oluşturur
+- Sepet silinir → Checkout tamamlandığı için sepet artık gerekli değil
 
 **Response:**
 - `200 OK` → Checkout başarılı
@@ -2945,12 +3262,18 @@ Başarısız → Unhealthy
 
 ### REST API Endpoint'leri:
 
-| Method | Endpoint | Açıklama | Response |
-|--------|----------|----------|----------|
-| GET | `/api/baskets/{userName}` | Sepeti getirir | `200 OK` + ShoppingCartDto |
-| POST | `/api/baskets` | Sepeti kaydeder/günceller | `200 OK` + ShoppingCartDto |
-| DELETE | `/api/baskets/{userName}` | Sepeti siler | `204 No Content` veya `404 Not Found` |
-| POST | `/api/baskets/checkout` | Checkout yapar | `200 OK` veya `400 Bad Request` |
+| Method | Endpoint | Açıklama | Handler | Ne Zaman Çalışır | Response |
+|--------|----------|----------|---------|------------------|----------|
+| GET | `/api/baskets/{userName}` | Sepeti getirir | `GetBasketHandler` | Sepet görüntülenirken | `200 OK` + ShoppingCartDto |
+| POST | `/api/baskets` | Sepeti kaydeder/günceller | `StoreBasketHandler` | Ürün ekleme/güncelleme | `200 OK` + ShoppingCartDto |
+| DELETE | `/api/baskets/{userName}` | Sepeti siler | `DeleteBasketHandler` | Manuel sepet silme | `204 No Content` veya `404 Not Found` |
+| POST | `/api/baskets/checkout` | Checkout yapar | `CheckoutBasketHandler` | Sipariş tamamlanırken | `200 OK` veya `400 Bad Request` |
+
+**Handler Açıklamaları:**
+- **GetBasketHandler:** Sepeti Redis'ten alır, indirim hesaplar, DTO'ya map eder (Query - Okuma)
+- **StoreBasketHandler:** Sepeti PostgreSQL'e kaydeder, Redis'e cache'ler (Command - Yazma)
+- **DeleteBasketHandler:** Sepeti PostgreSQL'den ve Redis'ten siler (Command - Yazma)
+- **CheckoutBasketHandler:** RabbitMQ'ya event gönderir, sepeti siler (Command - Yazma + Event)
 
 ### Önemli Kavramlar:
 

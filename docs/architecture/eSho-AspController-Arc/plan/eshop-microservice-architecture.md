@@ -1441,11 +1441,7 @@ builder.Services.AddMassTransit(config =>
     
     config.UsingRabbitMq((context, cfg) =>
     {
-        cfg.Host(builder.Configuration["MessageBroker:Host"], "/", h =>
-        {
-            h.Username("guest");
-            h.Password("guest");
-        });
+        cfg.Host(builder.Configuration["MessageBroker:Host"]);
         
         // Endpoint'leri otomatik configure et
         cfg.ConfigureEndpoints(context);
@@ -1871,7 +1867,7 @@ src/BuildingBlocks/
 |--------|--------------|-------|
 | **Catalog.API** | PostgreSQL | `AspNetCore.HealthChecks.NpgSql` |
 | **Basket.API** | Redis + PostgreSQL | `AspNetCore.HealthChecks.Redis`, `AspNetCore.HealthChecks.NpgSql` |
-| **Ordering.API** | PostgreSQL + RabbitMQ | `AspNetCore.HealthChecks.NpgSql`, `AspNetCore.HealthChecks.RabbitMQ` |
+| **Ordering.API** | PostgreSQL | `AspNetCore.HealthChecks.NpgSql` (RabbitMQ health check kaldırıldı - MassTransit zaten RabbitMQ'yu yönetiyor) |
 | **Discount.Grpc** | PostgreSQL | `AspNetCore.HealthChecks.NpgSql` |
 | **Gateway.API** | Downstream services | `AspNetCore.HealthChecks.Uris` |
 
@@ -1903,7 +1899,7 @@ healthcheck:
 |--------|---------------|---------------|----------|
 | **Gateway.API** | 8080 | 5000 | Ana giriş noktası |
 | **Catalog.API** | 8080 | 5001 | Ürün servisi |
-| **Basket.API** | 8080 | 5002 | Sepet servisi |
+| **Basket.API** | 8080 | 5278 | Sepet servisi (launchSettings.json'da 5278) |
 | **Ordering.API** | 8080 | 5003 | Sipariş servisi |
 | **Discount.Grpc** | 8080 | 5004 | İndirim servisi (gRPC) |
 
@@ -1925,7 +1921,7 @@ healthcheck:
 | **RedisInsight** | http://localhost:8001 | - |
 | **pgAdmin** | http://localhost:5050 | admin@admin.com / admin |
 | **Swagger (Catalog)** | http://localhost:5001/ | - |
-| **Swagger (Basket)** | http://localhost:5002/swagger | - |
+| **Swagger (Basket)** | http://localhost:5278/swagger | - |
 | **Swagger (Ordering)** | http://localhost:5003/swagger | - |
 | **Gateway** | http://localhost:5000 | - |
 
