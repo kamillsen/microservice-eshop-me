@@ -1,31 +1,34 @@
-Aşağıdaki README, içeriğini bozmadan **daha okunabilir**, **daha “GitHub-friendly”**, daha düzenli başlıklar + görsel bloklar + hızlı başlangıç akışıyla yenilenmiş bir versiyon. Kopyalayıp `README.md` olarak kullanabilirsin.
+GitHub README’leri için “genel kabul görmüş” yazım kuralları özetle şunlara dayanıyor: README, projeni **neden var**, **ne işe yarar** ve **nasıl kullanılır** sorularına hızlı cevap vermeli. ([GitHub Docs][1])
+İçerik **önem sırasına göre** düzenlenmeli, **uzun paragraflardan kaçınılmalı**, madde işaretleri/başlıklar ile okunabilirlik artırılmalı. ([GitHub Docs][2])
+GitHub, **GitHub Flavored Markdown** ile başlıklar, tablolar, kod blokları vb. standart Markdown yapısını önerir. ([GitHub Docs][3])
+ASCII diyagramlar yerine GitHub’ın desteklediği **Mermaid diyagramları** kullanılırsa görüntü bozulma ihtimali çok azalır. ([GitHub Docs][4])
+Badge tarafında da en stabil yöntem, HTML yerine düz Markdown formatıdır; Shields örnekleri bu biçimi temel alır. ([shields.io][5])
+
+Aşağıdaki README; **HTML’siz**, **badge’leri düzgün çalışan**, **Mermaid ile diyagramlı**, GitHub’da daha “temiz” görünen yeniden yazılmış sürüm:
 
 ````md
 # 🏪 E-Shop Microservice Practice Project
 
 > **Eğitim amaçlı microservice mimarisi e-ticaret projesi**  
-> Microservice, Redis, RabbitMQ, gRPC, Docker, CQRS ve API Gateway gibi modern yaklaşımları pratik etmek için tasarlanmıştır.
+> Microservice, Redis, RabbitMQ, gRPC, Docker, CQRS ve API Gateway (YARP) pratik etmek için tasarlanmıştır.
 
-<p align="left">
-  <a href="https://dotnet.microsoft.com/"><img src="https://img.shields.io/badge/.NET-9.0-purple.svg" /></a>
-  <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/Docker-Compose-blue.svg" /></a>
-  <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-blue.svg" /></a>
-  <a href="https://redis.io/"><img src="https://img.shields.io/badge/Redis-Stack-red.svg" /></a>
-  <a href="https://www.rabbitmq.com/"><img src="https://img.shields.io/badge/RabbitMQ-3-orange.svg" /></a>
-</p>
+[![.NET](https://img.shields.io/badge/.NET-9.0-512BD4?style=flat-square&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
+[![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Redis](https://img.shields.io/badge/Redis-Stack-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io/)
+[![RabbitMQ](https://img.shields.io/badge/RabbitMQ-3-FF6600?style=flat-square&logo=rabbitmq&logoColor=white)](https://www.rabbitmq.com/)
 
 ---
 
-## ✨ Neler Öğreneceksin?
+## ✨ Öne Çıkanlar
 
-- ✅ **Microservice mimarisi** (service decomposition, database-per-service)
-- ✅ **Redis** ile cache yönetimi (**cache-aside**)
-- ✅ **RabbitMQ + MassTransit** ile **event-driven** asenkron iletişim
-- ✅ **gRPC (h2c)** ile yüksek performanslı senkron servisler arası haberleşme
-- ✅ **Docker & Docker Compose** ile containerization
-- ✅ **CQRS + MediatR** pattern’i
-- ✅ **API Gateway (YARP)** ile merkezi routing / tek giriş noktası
-- ✅ **Health Checks** ile servis izleme
+- 🧩 **Microservice Architecture** (Database-per-service)
+- 🔄 **CQRS + MediatR**
+- 💾 **Redis Cache-aside** (Basket)
+- 📨 **RabbitMQ + MassTransit** (event-driven)
+- ⚡ **gRPC (h2c)** (Basket → Discount)
+- 🚪 **API Gateway (YARP)** (tek giriş noktası)
+- 🏥 **Health Checks** (servis izleme)
 
 ---
 
@@ -36,135 +39,100 @@ Aşağıdaki README, içeriğini bozmadan **daha okunabilir**, **daha “GitHub-
 - [Teknoloji Stack](#-teknoloji-stack)
 - [Hızlı Başlangıç](#-hızlı-başlangıç)
 - [Portlar ve Yönetim Panelleri](#-portlar-ve-yönetim-panelleri)
-- [Kullanım Örnekleri](#-kullanım-örnekleri)
+- [Kullanım](#-kullanım)
 - [API Endpoints](#-api-endpoints)
 - [Test Senaryosu (E2E)](#-test-senaryosu-e2e)
 - [Proje Yapısı](#-proje-yapısı)
-- [Durdurma](#-durdurma)
 - [Dokümantasyon](#-dokümantasyon)
+- [Durdurma](#-durdurma)
 
 ---
 
 ## 🏗️ Mimari
 
-### Genel Bakış
+### Genel Akış (Gateway → Servisler)
 
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                      API Gateway (YARP)                     │
-│                         Port: 5000                          │
-└───────────────────────┬─────────────────────────────────────┘
-                        │
-        ┌───────────────┼───────────────┐
-        │               │               │
-        ▼               ▼               ▼
-┌──────────┐      ┌──────────┐      ┌──────────┐
-│ Catalog  │      │  Basket  │      │ Ordering │
-│   API    │      │   API    │      │   API    │
-│  5001    │      │  5002    │      │  5003    │
-└────┬─────┘      └────┬─────┘      └────┬─────┘
-     │                 │                  │
-     │                 │                  │
-     │           ┌─────┴─────┐            │
-     │           ▼           ▼            │
-     │      PostgreSQL      Redis         │
-     │      (BasketDb)     (Cache)        │
-     │                 │
-     │                 ▼
-     │           Discount.Grpc (5004)
-     │                 │
-     │            PostgreSQL (DiscountDb)
-     │
-     └──────────────► PostgreSQL (CatalogDb)
+```mermaid
+flowchart TB
+  GW[API Gateway (YARP)\n:5000]
 
-                 Basket.API ──(async)──► RabbitMQ ──► Ordering.API
+  C[Catalog.API\n:5001]
+  B[Basket.API\n:5002]
+  O[Ordering.API\n:5003]
+  D[Discount.Grpc\n:5004]
+
+  CDB[(PostgreSQL\nCatalogDb)]
+  BDB[(PostgreSQL\nBasketDb)]
+  ODB[(PostgreSQL\nOrderingDb)]
+  DDB[(PostgreSQL\nDiscountDb)]
+  R[(Redis\nCache)]
+  MQ[(RabbitMQ)]
+
+  GW --> C
+  GW --> B
+  GW --> O
+
+  C --> CDB
+  B --> BDB
+  B --> R
+  O --> ODB
+  D --> DDB
+
+  B -->|gRPC sync| D
+  B -->|Checkout event async| MQ --> O
 ````
 
-### Servisler Arası İletişim
+### İletişim Tipleri
 
 * **Synchronous (gRPC):** `Basket.API → Discount.Grpc` (indirim sorgulama)
 * **Asynchronous (RabbitMQ):** `Basket.API → Ordering.API` (checkout event)
 
-### Database Per Service
+### Cache Stratejisi (Basket - Cache-aside)
 
-* **Catalog.API** → PostgreSQL (**CatalogDb**)
-* **Basket.API** → PostgreSQL (**BasketDb**) + Redis (**Cache**)
-* **Ordering.API** → PostgreSQL (**OrderingDb**)
-* **Discount.Grpc** → PostgreSQL (**DiscountDb**)
+* **Get Basket**
 
-### Cache Stratejisi (Basket)
+  1. Redis’te varsa Redis’ten dön
+  2. Yoksa PostgreSQL’den al → Redis’e yaz → dön
+* **Upsert Basket**
 
-**Cache-aside pattern:**
-
-```text
-Sepet Getirme:
-1) Redis'te var mı? → Evet: Redis'ten döner
-2) Yok: PostgreSQL'den alır → Redis'e yazar → Döner
-
-Sepet Kaydetme:
-1) PostgreSQL'e yazar (source of truth)
-2) Redis'e yazar (cache)
-```
+  1. PostgreSQL’e yaz (source of truth)
+  2. Redis’e yaz (cache)
 
 ---
 
 ## 🔧 Servisler
 
-### 1) Catalog Service (Ürün Kataloğu)
-
-* **Port:** `5001`
-* **DB:** PostgreSQL (CatalogDb)
-* Ürün & kategori yönetimi, CRUD, Swagger
-
-### 2) Basket Service (Sepet)
-
-* **Port:** `5002`
-* **DB:** PostgreSQL (BasketDb) + Redis (Cache)
-* Sepet yönetimi, Redis cache, gRPC ile indirim, RabbitMQ ile checkout event
-
-### 3) Ordering Service (Sipariş)
-
-* **Port:** `5003`
-* **DB:** PostgreSQL (OrderingDb)
-* RabbitMQ consumer, sipariş oluşturma/sorgulama, MassTransit ile event handling
-
-### 4) Discount Service (İndirim - gRPC)
-
-* **Port:** `5004` (gRPC), `5005` (Health)
-* **DB:** PostgreSQL (DiscountDb)
-* Kupon yönetimi & indirim sorgulama (HTTP/2 cleartext - h2c)
-
-### 5) Gateway Service (API Gateway - YARP)
-
-* **Port:** `5000`
-* Tek giriş noktası, routing, health aggregation
+| Servis          | Port | DB                            | Not                               |
+| --------------- | ---- | ----------------------------- | --------------------------------- |
+| Gateway.API     | 5000 | -                             | YARP reverse proxy                |
+| Catalog.API     | 5001 | PostgreSQL (CatalogDb)        | Ürün/Kategori CRUD                |
+| Basket.API      | 5002 | PostgreSQL (BasketDb) + Redis | Sepet + cache + gRPC + event      |
+| Ordering.API    | 5003 | PostgreSQL (OrderingDb)       | Event consumer + sipariş yönetimi |
+| Discount.Grpc   | 5004 | PostgreSQL (DiscountDb)       | gRPC kupon/indirim                |
+| Discount Health | 5005 | -                             | Health endpoint                   |
 
 ---
 
-## 🧰 Teknoloji Stack
+## 🛠️ Teknoloji Stack
 
-**Backend**
+### Backend
 
 * ASP.NET Core 9.0, C# 13
-* EF Core, AutoMapper, FluentValidation
 * CQRS + MediatR
+* EF Core, AutoMapper, FluentValidation
 
-**Data / Cache**
+### Data / Cache
 
 * PostgreSQL 16
 * Redis Stack (cache-aside)
 
-**Messaging**
+### Messaging / Communication
 
-* RabbitMQ 3
-* MassTransit
-
-**Communication**
-
+* RabbitMQ 3 + MassTransit
 * gRPC (h2c)
-* YARP (Reverse Proxy / Gateway)
+* YARP (API Gateway)
 
-**Infrastructure**
+### Infrastructure
 
 * Docker, Docker Compose
 * Health Checks
@@ -176,10 +144,10 @@ Sepet Kaydetme:
 ### Önkoşullar
 
 * .NET 9.0 SDK+
-* Docker & Docker Compose (v2.x)
+* Docker + Docker Compose (v2)
 * Git
 
-### Kurulum
+### Çalıştırma
 
 ```bash
 git clone <repository-url>
@@ -202,17 +170,6 @@ curl http://localhost:5005/health  # Discount
 
 ## 🔌 Portlar ve Yönetim Panelleri
 
-### Servis Portları
-
-| Servis          | Port | Açıklama               |
-| --------------- | ---- | ---------------------- |
-| Gateway.API     | 5000 | API Gateway            |
-| Catalog.API     | 5001 | Ürün servisi           |
-| Basket.API      | 5002 | Sepet servisi          |
-| Ordering.API    | 5003 | Sipariş servisi        |
-| Discount.Grpc   | 5004 | İndirim servisi (gRPC) |
-| Discount Health | 5005 | İndirim health check   |
-
 ### Management UI
 
 | Araç                | URL                                              | Kullanıcı/Şifre                                   |
@@ -221,11 +178,17 @@ curl http://localhost:5005/health  # Discount
 | RedisInsight        | [http://localhost:8001](http://localhost:8001)   | -                                                 |
 | pgAdmin             | [http://localhost:5050](http://localhost:5050)   | [admin@admin.com](mailto:admin@admin.com) / admin |
 
+### Swagger
+
+* Catalog: [http://localhost:5001/swagger](http://localhost:5001/swagger)
+* Basket: [http://localhost:5002/swagger](http://localhost:5002/swagger)
+* Ordering: [http://localhost:5003/swagger](http://localhost:5003/swagger)
+
 ---
 
-## 💻 Kullanım Örnekleri
+## 💻 Kullanım
 
-> Tüm endpoint’lere **Gateway** üzerinden erişilir.
+> Tüm API’lere Gateway üzerinden erişilir.
 
 ### Ürünleri Listele
 
@@ -281,7 +244,7 @@ curl -X POST http://localhost:5000/basket-service/api/baskets/checkout \
 
 ## 📡 API Endpoints
 
-### Catalog Service
+### Catalog
 
 ```text
 GET    /api/products
@@ -294,7 +257,7 @@ GET    /api/categories
 GET    /api/categories/{id}
 ```
 
-### Basket Service
+### Basket
 
 ```text
 GET    /api/baskets/{userName}
@@ -303,7 +266,7 @@ DELETE /api/baskets/{userName}
 POST   /api/baskets/checkout
 ```
 
-### Ordering Service
+### Ordering
 
 ```text
 GET    /api/orders
@@ -311,7 +274,7 @@ GET    /api/orders/{id}
 GET    /api/orders/user/{userName}
 ```
 
-### Discount Service (gRPC)
+### Discount (gRPC)
 
 ```text
 rpc GetDiscount(GetDiscountRequest) returns (CouponModel)
@@ -368,30 +331,18 @@ curl http://localhost:5000/ordering-service/api/orders/user/testuser
 
 ---
 
-## 🗂️ Proje Yapısı
+## 📁 Proje Yapısı
 
 ```text
 microservice-practice-me/
-│
 ├── src/
 │   ├── Services/
-│   │   ├── Catalog/
-│   │   │   └── Catalog.API/
-│   │   ├── Basket/
-│   │   │   └── Basket.API/
-│   │   ├── Ordering/
-│   │   │   └── Ordering.API/
-│   │   └── Discount/
-│   │       └── Discount.Grpc/
-│   │
-│   ├── ApiGateway/
-│   │   └── Gateway.API/
-│   │
+│   │   ├── Catalog/Catalog.API/
+│   │   ├── Basket/Basket.API/
+│   │   ├── Ordering/Ordering.API/
+│   │   └── Discount/Discount.Grpc/
+│   ├── ApiGateway/Gateway.API/
 │   └── BuildingBlocks/
-│       ├── BuildingBlocks.Exceptions/
-│       ├── BuildingBlocks.Behaviors/
-│       └── BuildingBlocks.Messaging/
-│
 ├── docs/
 ├── docker-compose.yml
 ├── global.json
@@ -402,13 +353,21 @@ microservice-practice-me/
 
 ---
 
+## 📖 Dokümantasyon
+
+* Mimari: `docs/architecture/`
+* Kurulum: `docs/proje-calisma-kilavuzu.md`
+* DB Özeti: `docs/docker-databases-summary.md`
+
+---
+
 ## 🛑 Durdurma
 
 ```bash
 docker compose down
 ```
 
-> Volume’ları da silmek (DB verileri silinir):
+> DB verilerini de silmek için:
 
 ```bash
 docker compose down -v
@@ -416,42 +375,18 @@ docker compose down -v
 
 ---
 
-## 📖 Dokümantasyon
-
-* **Mimari:** `docs/architecture/`
-* **Kurulum Rehberi:** `docs/proje-calisma-kilavuzu.md`
-* **DB Özeti:** `docs/docker-databases-summary.md`
-
----
-
-## 🤝 Katkı
-
-Bu proje eğitim amaçlıdır. Öneri ve iyileştirmeler için issue/PR açabilirsin.
-
----
-
-## 📝 Lisans
-
-Eğitim amaçlı açık kaynak.
-
----
-
-## 🙏 Teşekkürler
-
-* ASP.NET Core — [https://dotnet.microsoft.com/](https://dotnet.microsoft.com/)
-* Docker — [https://www.docker.com/](https://www.docker.com/)
-* PostgreSQL — [https://www.postgresql.org/](https://www.postgresql.org/)
-* Redis — [https://redis.io/](https://redis.io/)
-* RabbitMQ — [https://www.rabbitmq.com/](https://www.rabbitmq.com/)
-* gRPC — [https://grpc.io/](https://grpc.io/)
-* YARP — [https://microsoft.github.io/reverse-proxy/](https://microsoft.github.io/reverse-proxy/)
-
-⭐ Beğendiysen repo’ya yıldız bırakmayı unutma!
+⭐ Repo işine yaradıysa yıldız bırakmayı unutma!
 
 ```
 
-İstersen bir de README’yi “daha profesyonel” hale getirecek 3 küçük dokunuş ekleyebilirim (sen istemeden dosyayı uzatmadan):
-- En üste **Quick Links** (Swagger, Health, UI’lar)
-- “Architecture Decisions” veya “Roadmap / Next Steps” (örn: Observability, OpenTelemetry, retries, idempotency)
-- Basit bir **Sequence Diagram** (Checkout akışı: Basket → RabbitMQ → Ordering)
+İstersen bir sonraki adım olarak README’ye “çok şık görünen” şu iki şeyi de ekleyebilirim (bozmadan):
+- Gateway route’larının **tek tabloda** listelendiği bir “Routing” bölümü
+- “Troubleshooting” (port çakışması, container health, DB connection vb.) mini rehber
+::contentReference[oaicite:5]{index=5}
 ```
+
+[1]: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes?utm_source=chatgpt.com "About the repository README file"
+[2]: https://docs.github.com/en/contributing/writing-for-github-docs/best-practices-for-github-docs?utm_source=chatgpt.com "Best practices for GitHub Docs"
+[3]: https://docs.github.com/github/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax?utm_source=chatgpt.com "Basic writing and formatting syntax"
+[4]: https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/creating-diagrams?utm_source=chatgpt.com "Creating Mermaid diagrams"
+[5]: https://shields.io/badges?utm_source=chatgpt.com "Static Badge"
