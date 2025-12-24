@@ -1,5 +1,7 @@
 # 🏗️ E-Shop Microservice Mimarisi
 
+> Bu doküman, e-ticaret microservice projesinin mimari yapısını ve servisler arası iletişimi açıklar.
+
 ## 📁 Proje Yapısı
 
 ```
