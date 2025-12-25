@@ -5,7 +5,8 @@
 > **İçerik:**
 > - Önkoşullar
 > - Docker Container'ları Ayağa Kaldırma
-> - Catalog API'yi Çalıştırma
+> - Tüm Servisleri Çalıştırma (Docker Compose)
+> - API Gateway Üzerinden Erişim
 > - Test Etme
 > - Durdurma ve Temizlik
 > - Sorun Giderme
@@ -87,6 +88,8 @@ docker compose up -d
 - Network'leri oluşturur (container'lar arası iletişim için)
 
 **Başlatılan Container'lar:**
+
+**Altyapı Servisleri:**
 - `catalogdb` → PostgreSQL (port 5436)
 - `orderingdb` → PostgreSQL (port 5435)
 - `discountdb` → PostgreSQL (port 5434)
@@ -94,6 +97,13 @@ docker compose up -d
 - `basketdb` → Redis (port 6379, RedisInsight UI: 8001) - Basket Service cache için
 - `messagebroker` → RabbitMQ (AMQP: 5673, Management UI: 15673)
 - `pgadmin` → pgAdmin Web UI (port 5050)
+
+**Uygulama Servisleri:**
+- `catalog.api` → Catalog API (port 5001)
+- `basket.api` → Basket API (port 5002)
+- `ordering.api` → Ordering API (port 5003)
+- `discount.grpc` → Discount gRPC Service (port 5004/5005)
+- `gateway.api` → API Gateway (port 5000)
 
 **Başlatma Adımları:**
 ```bash
@@ -598,182 +608,246 @@ docker system df
 
 ---
 
-## 🚀 Catalog API'yi Çalıştırma
+## 🚀 Tüm Servisleri Çalıştırma
 
-Docker container'ları hazır olduktan sonra Catalog API'yi çalıştırabilirsiniz.
+Tüm servisler Docker container'ları içinde çalışır. Tek komutla tüm sistemi başlatabilirsiniz.
 
-### Adım 1: Proje Dizinine Git
+### Adım 1: Tüm Container'ları Başlat
 
 ```bash
-cd "/home/kSEN/Desktop/ Projects/microservice-practice-me/src/Services/Catalog/Catalog.API"
-```
-
-### Adım 2: API'yi Çalıştır
-
-**Komut:**
-```bash
-dotnet run --urls "http://localhost:5001"
+cd "/home/kSEN/Desktop/ Projects/microservice-practice-me"
+docker compose up -d
 ```
 
 **Ne Yapar?**
-- Catalog API'yi `http://localhost:5001` adresinde başlatır
-- Migration'ları otomatik uygular (`MigrateAsync()`)
-- Seed data'yı ekler (yoksa)
-- API hazır olana kadar bekler
+- Tüm altyapı servislerini başlatır (PostgreSQL, Redis, RabbitMQ, pgAdmin)
+- Tüm uygulama servislerini build eder ve başlatır
+- Migration'ları otomatik uygular
+- Health check'leri kontrol eder
+- Bağımlılıkları sırayla başlatır
 
 **Başarılı Başlatma Çıktısı:**
 ```
-Now listening on: http://localhost:5001
-Application started. Press Ctrl+C to shut down.
+[+] Running 12/12
+ ✔ Container discountdb      Started
+ ✔ Container orderingdb      Started
+ ✔ Container catalogdb      Started
+ ✔ Container basketpostgres  Started
+ ✔ Container basketdb        Started
+ ✔ Container messagebroker   Started
+ ✔ Container pgadmin         Started
+ ✔ Container discount.grpc   Started
+ ✔ Container catalog.api     Started
+ ✔ Container basket.api      Started
+ ✔ Container ordering.api     Started
+ ✔ Container gateway.api     Started
 ```
 
-**Alternatif (Proje Root'tan):**
+### Adım 2: Container Durumlarını Kontrol Et
+
 ```bash
-cd "/home/kSEN/Desktop/ Projects/microservice-practice-me"
-dotnet run --project src/Services/Catalog/Catalog.API/Catalog.API.csproj --urls "http://localhost:5001"
+# Tüm container'ların durumunu kontrol et
+docker compose ps
+
+# Health check durumlarını kontrol et
+docker ps --format "table {{.Names}}\t{{.Status}}"
+```
+
+**Beklenen Durum:**
+- Tüm container'lar `Up` veya `Up (healthy)` durumunda olmalı
+- Gateway container'ı diğer servisler hazır olduktan sonra başlamalı
+
+### Adım 3: Logları İzle (Opsiyonel)
+
+```bash
+# Tüm servislerin loglarını izle
+docker compose logs -f
+
+# Belirli bir servisin loglarını izle
+docker compose logs -f gateway.api
+docker compose logs -f catalog.api
 ```
 
 ---
 
-### API Durumunu Kontrol Etme
+## 🌐 API Gateway Üzerinden Erişim
 
-**1. Health Check:**
+Tüm servislere API Gateway (port 5000) üzerinden erişilir.
+
+### Gateway Endpoint'leri
+
+| Servis | Gateway Route | Doğrudan Erişim |
+|--------|---------------|----------------|
+| **Catalog** | `http://localhost:5000/catalog-service/api/...` | `http://localhost:5001/api/...` |
+| **Basket** | `http://localhost:5000/basket-service/api/...` | `http://localhost:5002/api/...` |
+| **Ordering** | `http://localhost:5000/ordering-service/api/...` | `http://localhost:5003/api/...` |
+
+### Health Check Endpoint'leri
+
 ```bash
+# Gateway kendi health check'i
+curl http://localhost:5000/health
+
+# Gateway downstream servislerin health check'i
+curl http://localhost:5000/health/downstream
+
+# Catalog API health check (doğrudan)
 curl http://localhost:5001/health
-# Beklenen: Healthy
+
+# Basket API health check (doğrudan)
+curl http://localhost:5002/health
+
+# Ordering API health check (doğrudan)
+curl http://localhost:5003/health
 ```
 
-**2. API Endpoint'leri:**
+### API Endpoint Örnekleri
+
+**Catalog API (Gateway üzerinden):**
 ```bash
 # Kategorileri listele
-curl http://localhost:5001/api/categories
+curl http://localhost:5000/catalog-service/api/categories
 
 # Ürünleri listele
-curl http://localhost:5001/api/products
-
-# Health check
-curl http://localhost:5001/health
+curl http://localhost:5000/catalog-service/api/products
 ```
 
-**3. Swagger UI:**
-Tarayıcıda aç: `http://localhost:5001/`
+**Basket API (Gateway üzerinden):**
+```bash
+# Sepeti getir
+curl http://localhost:5000/basket-service/api/baskets/user1
 
-- Tüm API endpoint'lerini görüntüleyebilirsiniz
-- "Try it out" butonu ile API'leri test edebilirsiniz
-- Request/Response örnekleri otomatik gösterilir
+# Sepete ürün ekle
+curl -X POST http://localhost:5000/basket-service/api/baskets \
+  -H "Content-Type: application/json" \
+  -d '{"userId":"user1","items":[...]}'
+```
+
+**Ordering API (Gateway üzerinden):**
+```bash
+# Siparişleri listele
+curl http://localhost:5000/ordering-service/api/orders
+```
+
+### Swagger UI
+
+Her servisin kendi Swagger UI'ı vardır:
+
+- **Catalog API:** http://localhost:5001/
+- **Basket API:** http://localhost:5002/
+- **Ordering API:** http://localhost:5003/
+
+**Not:** Gateway üzerinden Swagger UI erişimi yoktur. Doğrudan servis portlarından erişilir.
 
 ---
 
 ## 🧪 Test Etme
 
-### 1. Health Check Testi
+### 1. Health Check Testleri
 
+**Gateway Health Check:**
 ```bash
-curl http://localhost:5001/health
+curl http://localhost:5000/health
+# Beklenen: Healthy
 ```
 
-**Beklenen Çıktı:**
+**Downstream Services Health Check:**
+```bash
+curl http://localhost:5000/health/downstream
+# Beklenen: Healthy (catalog-api, basket-api, ordering-api)
 ```
-Healthy
+
+**Bireysel Servis Health Check'leri:**
+```bash
+# Catalog API
+curl http://localhost:5001/health
+
+# Basket API
+curl http://localhost:5002/health
+
+# Ordering API
+curl http://localhost:5003/health
 ```
 
 **Hata Durumu:**
 - Container durmuşsa → `Unhealthy` veya hata
 - Veritabanı bağlantısı yoksa → `Unhealthy`
+- Downstream servis hazır değilse → Gateway `/health/downstream` hata döner
 
 ---
 
-### 2. API Endpoint Testleri
+### 2. API Endpoint Testleri (Gateway Üzerinden)
 
-**Kategorileri Listele:**
+**Catalog API:**
 ```bash
-curl http://localhost:5001/api/categories
+# Kategorileri listele
+curl http://localhost:5000/catalog-service/api/categories
+
+# Ürünleri listele
+curl http://localhost:5000/catalog-service/api/products
+
+# Belirli bir ürünü getir
+PRODUCT_ID=$(curl -s http://localhost:5000/catalog-service/api/products | jq -r '.[0].id')
+curl http://localhost:5000/catalog-service/api/products/$PRODUCT_ID
 ```
 
-**Beklenen Çıktı:**
-```json
-[
-  {"id":"...","name":"Giyim"},
-  {"id":"...","name":"Elektronik"},
-  {"id":"...","name":"Ev & Yaşam"}
-]
+**Basket API:**
+```bash
+# Sepeti getir
+curl http://localhost:5000/basket-service/api/baskets/user1
+
+# Sepete ürün ekle
+curl -X POST http://localhost:5000/basket-service/api/baskets \
+  -H "Content-Type: application/json" \
+  -d '{"userId":"user1","items":[{"productId":"...","quantity":2}]}'
 ```
 
-**Ürünleri Listele:**
+**Ordering API:**
 ```bash
-curl http://localhost:5001/api/products
-```
-
-**Belirli Bir Ürünü Getir:**
-```bash
-# Önce bir ürün ID'si al
-PRODUCT_ID=$(curl -s http://localhost:5001/api/products | jq -r '.[0].id')
-curl http://localhost:5001/api/products/$PRODUCT_ID
+# Siparişleri listele
+curl http://localhost:5000/ordering-service/api/orders
 ```
 
 ---
 
 ### 3. Swagger UI'dan Test
 
-1. Tarayıcıda `http://localhost:5001/` aç
-2. Endpoint'i seç (örn: `GET /api/categories`)
-3. "Try it out" butonuna tıkla
-4. "Execute" butonuna tıkla
-5. Response'u görüntüle
+Her servisin kendi Swagger UI'ı vardır:
+
+1. **Catalog API:** Tarayıcıda `http://localhost:5001/` aç
+2. **Basket API:** Tarayıcıda `http://localhost:5002/` aç
+3. **Ordering API:** Tarayıcıda `http://localhost:5003/` aç
+
+**Test Adımları:**
+1. Endpoint'i seç (örn: `GET /api/categories`)
+2. "Try it out" butonuna tıkla
+3. "Execute" butonuna tıkla
+4. Response'u görüntüle
+
+---
+
+### 4. Docker Container Loglarını İzleme
+
+```bash
+# Tüm servislerin loglarını izle
+docker compose logs -f
+
+# Belirli bir servisin loglarını izle
+docker compose logs -f catalog.api
+docker compose logs -f basket.api
+docker compose logs -f gateway.api
+
+# Son 50 satırı göster
+docker compose logs --tail=50 gateway.api
+```
 
 ---
 
 ## 🛑 Durdurma ve Temizlik
 
-### API'yi Durdurma
+### Tüm Servisleri Durdurma
 
-#### Yöntem 1: Terminal'de Durdurma (Önerilen)
-
-**API çalıştığı terminal'de:**
-- `Ctrl+C` tuşlarına bas
-- API durur ve terminal kontrolü size geri döner
-
-**Ne Yapar:**
-- API process'ini güvenli şekilde sonlandırır
-- Açık bağlantıları kapatır
-- Veritabanı bağlantılarını temizler
-
----
-
-#### Yöntem 2: Process'i Bulup Durdurma
-
-**API başka bir terminal'de çalışıyorsa veya arka planda çalışıyorsa:**
-
-```bash
-# 1. Process'i bul
-ps aux | grep dotnet | grep Catalog
-
-# Çıktı örneği:
-# kSEN  12345  0.5  2.1  ...  dotnet run --urls "http://localhost:5001"
-
-# 2. Process ID'sini al (ikinci sütun: 12345)
-# 3. Process'i durdur
-kill 12345
-
-# Veya tek komutta:
-ps aux | grep "[d]otnet.*Catalog" | awk '{print $2}' | xargs kill
-```
-
-**Zorla Durdurma (gerekirse):**
-```bash
-# Process ID'sini bul
-PID=$(ps aux | grep "[d]otnet.*Catalog" | awk '{print $2}')
-
-# Zorla durdur
-kill -9 $PID
-```
-
-**Kontrol:**
-```bash
-# Process durdu mu kontrol et
-ps aux | grep dotnet | grep Catalog
-# Hiçbir çıktı olmamalı
-```
+Tüm servisler Docker container'ları içinde çalıştığı için tek komutla durdurulabilir.
 
 ---
 
@@ -1043,16 +1117,9 @@ docker ps | grep catalogdb
 
 ---
 
-### Tüm Sistemi Durdurma (API + Container'lar)
+### Tüm Sistemi Durdurma
 
-**Adım 1: API'yi Durdur**
-```bash
-# Terminal'de Ctrl+C
-# veya
-ps aux | grep "[d]otnet.*Catalog" | awk '{print $2}' | xargs kill
-```
-
-**Adım 2: Container'ları Durdur**
+**Komut:**
 ```bash
 cd "/home/kSEN/Desktop/ Projects/microservice-practice-me"
 docker compose down
@@ -1060,13 +1127,13 @@ docker compose down
 
 **Kontrol:**
 ```bash
-# API durdu mu?
-ps aux | grep dotnet | grep Catalog
-# Çıktı olmamalı
-
 # Container'lar durdu mu?
+docker compose ps
+# Hiçbir container görünmemeli
+
+# Veya
 docker ps
-# Catalog ile ilgili container görünmemeli
+# Proje container'ları görünmemeli
 ```
 
 ---
@@ -1137,25 +1204,15 @@ ss -tuln | grep 5001
 
 ### Hızlı Durdurma (Özet)
 
-**API'yi Durdur:**
-```bash
-# Terminal'de Ctrl+C
-# veya
-pkill -f "dotnet.*Catalog"
-```
-
-**Container'ları Durdur:**
+**Tüm Servisleri Durdur:**
 ```bash
 docker compose down
 ```
 
-**Tümünü Durdur:**
+**Container'ları Durdur ama Kaldırma (Hızlı Restart için):**
 ```bash
-# API
-pkill -f "dotnet.*Catalog"
-
-# Container'lar
-docker compose down
+docker compose stop
+# Yeniden başlatmak için: docker compose start
 ```
 
 ---
@@ -1203,7 +1260,7 @@ docker exec catalogdb pg_isready -U postgres
 
 ---
 
-### Sorun 3: API Veritabanına Bağlanamıyor
+### Sorun 3: Servis Veritabanına Bağlanamıyor
 
 **Hata:**
 ```
@@ -1214,24 +1271,34 @@ Npgsql.NpgsqlException: Connection refused
 
 1. **Container çalışıyor mu?**
    ```bash
-   docker ps | grep catalogdb
+   docker compose ps
+   # Tüm container'lar Up (healthy) olmalı
    ```
 
 2. **Veritabanı hazır mı?**
    ```bash
    docker exec catalogdb pg_isready -U postgres
+   docker exec orderingdb pg_isready -U postgres
+   docker exec discountdb pg_isready -U postgres
+   docker exec basketpostgres pg_isready -U postgres
    ```
 
 3. **Connection string doğru mu?**
-   - `appsettings.json` dosyasını kontrol et
-   - Port: `5436` (host port)
-   - Host: `localhost`
+   - Container network içinde: `Host=catalogdb;Port=5432` (container port)
+   - Localhost'tan: `Host=localhost;Port=5436` (host port)
+   - Docker Compose environment variables'ı kontrol et
 
 4. **Port erişilebilir mi?**
    ```bash
-   netstat -tuln | grep 5436
+   netstat -tuln | grep -E "(5436|5435|5434|5437)"
    # veya
-   ss -tuln | grep 5436
+   ss -tuln | grep -E "(5436|5435|5434|5437)"
+   ```
+
+5. **Container loglarını kontrol et:**
+   ```bash
+   docker compose logs catalog.api
+   docker compose logs basket.api
    ```
 
 ---
@@ -1244,12 +1311,18 @@ Failed to apply migration
 ```
 
 **Çözüm:**
+Migration'lar genellikle servis başlatıldığında otomatik uygulanır. Eğer hata varsa:
+
 ```bash
-# Migration'ları manuel uygula
-cd src/Services/Catalog/Catalog.API
-export DOTNET_ROOT=/usr/lib64/dotnet
-dotnet ef database update --startup-project . --context CatalogDbContext
+# Container loglarını kontrol et
+docker compose logs catalog.api | grep -i migration
+
+# Container içine girip manuel uygula (gerekirse)
+docker exec -it catalog.api bash
+# Container içinde dotnet ef komutları çalıştırılabilir
 ```
+
+**Not:** Docker container'ları içinde EF Core tool'ları yüklü olmayabilir. Migration'lar genellikle `Program.cs` içinde `MigrateAsync()` ile otomatik uygulanır.
 
 ---
 
@@ -1275,6 +1348,8 @@ docker ps
 
 ## 📊 Container Port Özeti
 
+### Altyapı Servisleri
+
 | Container | Servis | Host Port | Container Port | URL |
 |-----------|--------|-----------|----------------|-----|
 | `catalogdb` | PostgreSQL | 5436 | 5432 | - |
@@ -1287,40 +1362,53 @@ docker ps
 | `messagebroker` | RabbitMQ Management | 15673 | 15672 | http://localhost:15673 |
 | `pgadmin` | pgAdmin Web UI | 5050 | 80 | http://localhost:5050 |
 
+### Uygulama Servisleri
+
+| Container | Servis | Host Port | Container Port | URL |
+|-----------|--------|-----------|----------------|-----|
+| `gateway.api` | API Gateway | 5000 | 8080 | http://localhost:5000 |
+| `catalog.api` | Catalog API | 5001 | 8080 | http://localhost:5001 |
+| `basket.api` | Basket API | 5002 | 8080 | http://localhost:5002 |
+| `ordering.api` | Ordering API | 5003 | 8080 | http://localhost:5003 |
+| `discount.grpc` | Discount gRPC | 5004 | 8080 | - |
+| `discount.grpc` | Discount Health | 5005 | 8081 | http://localhost:5005/health |
+
 ---
 
 ## 🎯 Hızlı Başlangıç (Özet)
 
 **Tüm Sistemi Ayağa Kaldırma:**
 ```bash
-# 1. Container'ları başlat
+# 1. Proje dizinine git
 cd "/home/kSEN/Desktop/ Projects/microservice-practice-me"
+
+# 2. Tüm container'ları başlat
 docker compose up -d
 
-# 2. Container'ların hazır olmasını bekle (5-10 saniye)
-sleep 10
-
-# 3. Catalog API'yi başlat
-cd src/Services/Catalog/Catalog.API
-dotnet run --urls "http://localhost:5001"
+# 3. Container'ların hazır olmasını bekle (30-60 saniye)
+# Health check'ler tamamlanana kadar bekleyin
+docker compose ps
 ```
 
 **Test:**
 ```bash
-# Health check
-curl http://localhost:5001/health
+# Gateway health check
+curl http://localhost:5000/health
 
-# API test
-curl http://localhost:5001/api/categories
+# Downstream services health check
+curl http://localhost:5000/health/downstream
+
+# Catalog API test (Gateway üzerinden)
+curl http://localhost:5000/catalog-service/api/categories
 
 # Swagger UI
-# Tarayıcıda: http://localhost:5001/
+# Catalog: http://localhost:5001/
+# Basket: http://localhost:5002/
+# Ordering: http://localhost:5003/
 ```
 
 **Durdurma:**
 ```bash
-# API: Terminal'de Ctrl+C
-# Container'lar:
 docker compose down
 ```
 
@@ -1331,19 +1419,35 @@ docker compose down
 ### Port Çakışması
 
 - Sistemdeki PostgreSQL port 5432'de çalışıyorsa, Docker container'lar farklı portlarda çalışır
-- `catalogdb`: Port 5436 (sistem PostgreSQL ile çakışmayı önlemek için)
-- Connection string'de host port kullanılır: `Port=5436`
+- `catalogdb`: Port 5436
+- `orderingdb`: Port 5435
+- `discountdb`: Port 5434
+- `basketpostgres`: Port 5437
+- Connection string'de container network içinde container port kullanılır: `Port=5432`
+- Localhost'tan bağlanırken host port kullanılır: `Port=5436`
 
 ### Veritabanı Bağlantısı
 
-- **Localhost'tan bağlanırken:** `Host=localhost;Port=5436` (host port)
 - **Container network içinden:** `Host=catalogdb;Port=5432` (container port)
+- **Localhost'tan bağlanırken:** `Host=localhost;Port=5436` (host port)
 
 ### Migration ve Seed Data
 
-- Catalog API başlatıldığında migration'lar otomatik uygulanır
+- Tüm servisler başlatıldığında migration'lar otomatik uygulanır
 - Seed data otomatik eklenir (veri yoksa)
 - Manuel migration gerekmez
+
+### Gateway Routing
+
+- Gateway tüm servislere tek giriş noktası sağlar
+- Route prefix'leri: `/catalog-service`, `/basket-service`, `/ordering-service`
+- Gateway route'ları `appsettings.json` içinde tanımlıdır
+
+### Health Checks
+
+- Gateway'in kendi health check'i: `/health` (sadece Gateway durumunu kontrol eder)
+- Downstream servislerin health check'i: `/health/downstream` (Catalog, Basket, Ordering)
+- Her servisin kendi health check endpoint'i vardır: `http://localhost:PORT/health`
 
 ---
 

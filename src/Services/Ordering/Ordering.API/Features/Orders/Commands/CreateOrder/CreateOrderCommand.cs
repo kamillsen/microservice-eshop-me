@@ -6,6 +6,7 @@ namespace Ordering.API.Features.Orders.Commands.CreateOrder;
 public record CreateOrderCommand(
     string UserName,
     decimal TotalPrice,
+    decimal Discount,
     List<OrderItemDto> Items,
     string FirstName,
     string LastName,

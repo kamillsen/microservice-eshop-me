@@ -32,7 +32,7 @@ public class GetProductsHandler : IRequestHandler<GetProductsQuery, IEnumerable<
         var products = await query
             .Skip((request.PageNumber - 1) * request.PageSize)
             .Take(request.PageSize)
-            .ToListAsync(cancellationToken);
+            .ToListAsync(cancellationToken); // Query'i çalıştır ve sonucu listeye çevir
 
         // 4. Entity → DTO mapping  -  Product -> ProductDto
         return _mapper.Map<IEnumerable<ProductDto>>(products);

@@ -1,9 +1,9 @@
 using AutoMapper;
 using Basket.API.Data;
+using Basket.API.GrpcServices;
 using BuildingBlocks.Messaging.Events;
 using MassTransit;
 using MediatR;
-using BasketCheckoutItem = BuildingBlocks.Messaging.Events.BasketCheckoutItem;
 
 namespace Basket.API.Features.Basket.Commands.CheckoutBasket;
 
@@ -33,14 +33,18 @@ public class CheckoutBasketHandler : IRequestHandler<CheckoutBasketCommand, bool
     private readonly IMapper _mapper;
     private readonly ILogger<CheckoutBasketHandler> _logger;
 
+    private readonly DiscountGrpcService _discountGrpcService;
+
     public CheckoutBasketHandler(
         IBasketRepository repository,
         IPublishEndpoint publishEndpoint,
+        DiscountGrpcService discountGrpcService,
         IMapper mapper,
         ILogger<CheckoutBasketHandler> logger)
     {
         _repository = repository;
         _publishEndpoint = publishEndpoint;
+        _discountGrpcService = discountGrpcService;
         _mapper = mapper;
         _logger = logger;
     }
@@ -60,20 +64,30 @@ public class CheckoutBasketHandler : IRequestHandler<CheckoutBasketCommand, bool
             return false;
         }
 
+        decimal totalDiscount = 0;
+        foreach (var item in basket.Items)
+        {
+            var coupon = await _discountGrpcService.GetDiscount(item.ProductName);
+            if(coupon.Amount > 0)
+            {
+                totalDiscount += coupon.Amount * item.Quantity;
+            }
+        }
         var eventMessage = _mapper.Map<BasketCheckoutEvent>(request);
         var items = _mapper.Map<List<BasketCheckoutItem>>(basket.Items);
 
         eventMessage = eventMessage with
         {
             TotalPrice = basket.TotalPrice,
-            Items = items
+            Discount = totalDiscount,
+            Items = items,
         };
 
         await _publishEndpoint.Publish(eventMessage, cancellationToken);
 
         _logger.LogInformation(
-            "BasketCheckoutEvent published for {UserName}. TotalPrice: {TotalPrice}, ItemCount: {ItemCount}",
-            request.UserName, eventMessage.TotalPrice, eventMessage.Items.Count);
+            "BasketCheckoutEvent published for {UserName}. TotalPrice: {TotalPrice}, Discount: {Discount}, ItemCount: {ItemCount}",
+            request.UserName, eventMessage.TotalPrice, eventMessage.Discount, eventMessage.Items.Count);
 
         await _repository.DeleteBasket(request.UserName);
 

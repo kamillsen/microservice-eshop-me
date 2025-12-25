@@ -16,7 +16,7 @@ public class MappingProfile : Profile
         CreateMap<OrderItem, OrderItemDto>().ReverseMap();
 
         CreateMap<CreateOrderCommand, Order>()
-            .ForMember(dest => dest.Items, opt => opt.Ignore());
+            .ForMember(dest => dest.Items, opt => opt.Ignore()); // Items handler'da işlenecek (SRP)
 
         CreateMap<OrderItemDto, OrderItem>();
 

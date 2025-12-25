@@ -1,0 +1,197 @@
+@page "/checkout"
+@inject IBasketService BasketService
+@inject UserStateService UserStateService
+@inject BasketStateService BasketStateService
+@inject NavigationManager Navigation
+
+<PageTitle>Ödeme</PageTitle>
+
+<div class="container mt-4">
+    <h1 class="mb-4">Ödeme</h1>
+
+    @if (basket == null)
+    {
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+        </div>
+    }
+    else if (!basket.Items.Any())
+    {
+        <div class="alert alert-warning">
+            Sepetiniz boş. <a href="/">Alışverişe başlamak için tıklayın</a>
+        </div>
+    }
+    else
+    {
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5>Adres Bilgileri</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Ad *</label>
+                                <input type="text" class="form-control" @bind="checkoutCommand.FirstName" required />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Soyad *</label>
+                                <input type="text" class="form-control" @bind="checkoutCommand.LastName" required />
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">E-posta *</label>
+                            <input type="email" class="form-control" @bind="checkoutCommand.EmailAddress" required />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Adres Satırı *</label>
+                            <input type="text" class="form-control" @bind="checkoutCommand.AddressLine" required />
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label class="form-label">Ülke *</label>
+                                <input type="text" class="form-control" @bind="checkoutCommand.Country" required />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Şehir *</label>
+                                <input type="text" class="form-control" @bind="checkoutCommand.State" required />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Posta Kodu *</label>
+                                <input type="text" class="form-control" @bind="checkoutCommand.ZipCode" required />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Ödeme Bilgileri</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Kart Üzerindeki İsim *</label>
+                            <input type="text" class="form-control" @bind="checkoutCommand.CardName" required />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Kart Numarası *</label>
+                            <input type="text" class="form-control" @bind="checkoutCommand.CardNumber" required maxlength="16" />
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Son Kullanma Tarihi (MM/YY) *</label>
+                                <input type="text" class="form-control" @bind="checkoutCommand.Expiration" required placeholder="12/26" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">CVV *</label>
+                                <input type="text" class="form-control" @bind="checkoutCommand.CVV" required maxlength="3" />
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Ödeme Yöntemi *</label>
+                            <select class="form-select" @bind="checkoutCommand.PaymentMethod">
+                                <option value="1">Kredi Kartı</option>
+                                <option value="2">Banka Kartı</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Sipariş Özeti</h5>
+                    </div>
+                    <div class="card-body">
+                        @foreach (var item in basket.Items)
+                        {
+                            <div class="d-flex justify-content-between mb-2">
+                                <span>@item.ProductName x @item.Quantity</span>
+                                <span>@((item.Price * item.Quantity).ToString("C"))</span>
+                            </div>
+                        }
+                        <hr>
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Ara Toplam:</span>
+                            <strong>@basket.TotalPrice.ToString("C")</strong>
+                        </div>
+                        @if (basket.Discount > 0)
+                        {
+                            <div class="d-flex justify-content-between mb-2 text-success">
+                                <span>İndirim:</span>
+                                <strong>-@basket.Discount.ToString("C")</strong>
+                            </div>
+                        }
+                        <hr>
+                        <div class="d-flex justify-content-between mb-3">
+                            <span><strong>Toplam:</strong></span>
+                            <strong class="text-primary">@((basket.TotalPrice - basket.Discount).ToString("C"))</strong>
+                        </div>
+                        <button class="btn btn-primary w-100 btn-lg" @onclick="SubmitCheckout" disabled="@isProcessing">
+                            @if (isProcessing)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            Siparişi Tamamla
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private ShoppingCartDto? basket;
+    private CheckoutBasketCommand checkoutCommand = new();
+    private bool isProcessing = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var userName = await UserStateService.GetUserNameAsync();
+            basket = await BasketService.GetBasketAsync(userName);
+            
+            if (basket != null && basket.Items.Any())
+            {
+                checkoutCommand.UserName = userName;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading basket: {ex.Message}");
+        }
+    }
+
+    private async Task SubmitCheckout()
+    {
+        if (basket == null || !basket.Items.Any()) return;
+
+        isProcessing = true;
+        try
+        {
+            var result = await BasketService.CheckoutBasketAsync(checkoutCommand);
+            if (result)
+            {
+                BasketStateService.Clear();
+                Navigation.NavigateTo("/orders");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error during checkout: {ex.Message}");
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+}
+
+@using Web.UI.Models
+

@@ -5,6 +5,7 @@ public class Order
     public Guid Id { get; set; } = Guid.NewGuid();
     public string UserName { get; set; } = default!;
     public decimal TotalPrice { get; set; }
+    public decimal Discount { get; set; }
     public DateTime OrderDate { get; set; } = DateTime.UtcNow;
     public OrderStatus Status { get; set; } = OrderStatus.Pending;
     

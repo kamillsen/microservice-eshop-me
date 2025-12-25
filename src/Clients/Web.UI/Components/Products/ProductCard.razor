@@ -1,0 +1,38 @@
+@using Web.UI.Models
+
+<div class="card h-100">
+    @if (!string.IsNullOrEmpty(Product.ImageUrl))
+    {
+        <img src="@Product.ImageUrl" class="card-img-top" alt="@Product.Name" style="height: 200px; object-fit: cover;">
+    }
+    else
+    {
+        <div class="card-img-top bg-secondary d-flex align-items-center justify-content-center" style="height: 200px;">
+            <span class="text-white">Resim Yok</span>
+        </div>
+    }
+    <div class="card-body d-flex flex-column">
+        <h5 class="card-title">@Product.Name</h5>
+        <p class="card-text flex-grow-1">@(Product.Description ?? "Açıklama yok")</p>
+        <p class="card-text">
+            <strong class="text-primary">@Product.Price.ToString("C")</strong>
+        </p>
+        <div class="mt-auto">
+            <button class="btn btn-primary w-100" @onclick="() => OnAddToBasket.InvokeAsync(Product)">
+                Sepete Ekle
+            </button>
+            <a href="/product/@Product.Id" class="btn btn-outline-secondary w-100 mt-2">
+                Detaylar
+            </a>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public ProductDto Product { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback<ProductDto> OnAddToBasket { get; set; }
+}
+
