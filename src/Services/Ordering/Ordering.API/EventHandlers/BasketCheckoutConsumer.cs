@@ -30,6 +30,7 @@ public class BasketCheckoutConsumer : IConsumer<BasketCheckoutEvent>
         try
         {
             // 1. Event'ten Command oluştur
+            // Bu generic parametre context.Message'in tipini belirler. BasketCheckoutEvent
             var command = _mapper.Map<CreateOrderCommand>(context.Message);
 
             // 2. MediatR ile CreateOrderHandler'ı çağır

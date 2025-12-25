@@ -4,6 +4,7 @@ public record BasketCheckoutEvent : IntegrationEvent
 {
     public string UserName { get; init; } = default!;
     public decimal TotalPrice { get; init; }
+    public decimal Discount { get; init; } 
     
     // Basket Items
     public List<BasketCheckoutItem> Items { get; init; } = new();

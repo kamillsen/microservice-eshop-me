@@ -24,22 +24,19 @@ public class CreateOrderHandler : IRequestHandler<CreateOrderCommand, Guid>
 
     public async Task<Guid> Handle(CreateOrderCommand request, CancellationToken cancellationToken)
     {
-        // 1. Command'dan Entity oluştur
+        // Command'dan Entity oluştur (basit property mapping)
         var order = _mapper.Map<Order>(request);
-        order.Id = Guid.NewGuid();
-        order.OrderDate = DateTime.UtcNow;
-        order.Status = OrderStatus.Pending;
-
-        // 2. OrderItems'ları ekle
-        foreach (var itemDto in request.Items)
+        
+        // Business Logic: OrderItem'lara OrderId ata (Foreign Key Relationship)
+        // SRP: Bu business rule handler'da olmalı, mapping'de değil
+        order.Items = request.Items.Select(itemDto =>
         {
             var orderItem = _mapper.Map<OrderItem>(itemDto);
-            orderItem.Id = Guid.NewGuid();
-            orderItem.OrderId = order.Id;
-            order.Items.Add(orderItem);
-        }
+            orderItem.OrderId = order.Id; // Parent Order'ın Id'sini ata
+            return orderItem;
+        }).ToList();
 
-        // 3. Veritabanına kaydet
+        // Veritabanına kaydet
         _context.Orders.Add(order);
         await _context.SaveChangesAsync(cancellationToken);
 
