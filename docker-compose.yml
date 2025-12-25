@@ -241,6 +241,17 @@ services:
       retries: 3
       start_period: 40s
 
+  web.ui:
+    image: ${DOCKER_REGISTRY-}webui
+    container_name: web.ui
+    build:
+      context: .
+      dockerfile: src/Clients/Web.UI/Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      - gateway.api
+
 volumes:
   catalogdb_data:
   orderingdb_data:

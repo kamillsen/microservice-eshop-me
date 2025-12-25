@@ -2,6 +2,7 @@ using AutoMapper;
 using Basket.API.Data;
 using Basket.API.Dtos;
 using Basket.API.Entities;
+using Basket.API.GrpcServices;
 using MediatR;
 
 namespace Basket.API.Features.Basket.Commands.StoreBasket;
@@ -27,15 +28,18 @@ namespace Basket.API.Features.Basket.Commands.StoreBasket;
 public class StoreBasketHandler : IRequestHandler<StoreBasketCommand, ShoppingCartDto>
 {
     private readonly IBasketRepository _repository;
+    private readonly DiscountGrpcService _discountGrpcService;
     private readonly IMapper _mapper;
     private readonly ILogger<StoreBasketHandler> _logger;
 
     public StoreBasketHandler(
         IBasketRepository repository,
+        DiscountGrpcService discountGrpcService,
         IMapper mapper,
         ILogger<StoreBasketHandler> logger)
     {
         _repository = repository;
+        _discountGrpcService = discountGrpcService;
         _mapper = mapper;
         _logger = logger;
     }
@@ -57,7 +61,24 @@ public class StoreBasketHandler : IRequestHandler<StoreBasketCommand, ShoppingCa
         // ADIM 3: Kaydedilen Entity'yi DTO'ya map et (frontend'e döndürmek için)
         var basketDto = _mapper.Map<ShoppingCartDto>(savedBasket);
 
-        _logger.LogInformation("Basket stored for {UserName}", request.Basket.UserName);
+        // ADIM 4: Her ürün için Discount gRPC servisinden indirim sorgula
+        decimal totalDiscount = 0;
+        foreach (var item in savedBasket.Items)
+        {
+            var coupon = await _discountGrpcService.GetDiscount(item.ProductName);
+            if (coupon.Amount > 0)
+            {
+                // İndirim miktarı × ürün adedi = toplam indirim
+                totalDiscount += coupon.Amount * item.Quantity;
+            }
+        }
+
+        // ADIM 5: Discount'ı DTO'ya ekle
+        basketDto.Discount = totalDiscount;
+        basketDto.TotalPrice = savedBasket.TotalPrice - totalDiscount; // İndirimli fiyatı hesapla
+
+        _logger.LogInformation("Basket stored for {UserName}: TotalPrice={TotalPrice}, Discount={Discount}",
+            request.Basket.UserName, basketDto.TotalPrice, basketDto.Discount);
 
         return basketDto;
     }

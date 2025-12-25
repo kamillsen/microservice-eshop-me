@@ -1,0 +1,32 @@
+@inject BasketStateService BasketStateService
+
+@if (itemCount > 0)
+{
+    <a href="/basket" class="btn btn-outline-light">
+        <span>🛒 Sepet (@itemCount)</span>
+    </a>
+}
+
+@implements IDisposable
+
+@code {
+    private int itemCount = 0;
+
+    protected override void OnInitialized()
+    {
+        itemCount = BasketStateService.ItemCount;
+        BasketStateService.OnItemCountChanged += UpdateItemCount;
+    }
+
+    private void UpdateItemCount()
+    {
+        itemCount = BasketStateService.ItemCount;
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        BasketStateService.OnItemCountChanged -= UpdateItemCount;
+    }
+}
+

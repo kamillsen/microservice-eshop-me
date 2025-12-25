@@ -1,0 +1,110 @@
+@page "/"
+@inject ICatalogService CatalogService
+@inject IBasketService BasketService
+@inject UserStateService UserStateService
+@inject BasketStateService BasketStateService
+@inject NavigationManager Navigation
+
+<PageTitle>Ana Sayfa - E-Ticaret</PageTitle>
+
+<div class="container mt-4">
+    <h1 class="mb-4">Ürünler</h1>
+
+    @if (errorMessage != null)
+    {
+        <div class="alert alert-danger" role="alert">
+            <strong>Hata:</strong> @errorMessage
+            <br />
+            <small>Lütfen API Gateway'in çalıştığından emin olun (http://localhost:5000)</small>
+        </div>
+    }
+    else if (products == null)
+    {
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+        </div>
+    }
+    else if (!products.Any())
+    {
+        <p>Henüz ürün bulunmamaktadır.</p>
+    }
+    else
+    {
+        <div class="row">
+            @foreach (var product in products)
+            {
+                <div class="col-md-4 mb-4">
+                    <ProductCard Product="product" OnAddToBasket="AddToBasket" />
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<ProductDto>? products;
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            products = (await CatalogService.GetProductsAsync()).ToList();
+            errorMessage = null;
+        }
+        catch (HttpRequestException httpEx)
+        {
+            errorMessage = $"HTTP Hatası: {httpEx.Message}";
+            if (httpEx.Data.Contains("StatusCode"))
+            {
+                errorMessage += $" (Status: {httpEx.Data["StatusCode"]})";
+            }
+            Console.WriteLine($"HTTP Error loading products: {httpEx.Message}");
+            products = new List<ProductDto>();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Hata: {ex.Message}";
+            Console.WriteLine($"Error loading products: {ex.Message}");
+            products = new List<ProductDto>();
+        }
+    }
+
+    private async Task AddToBasket(ProductDto product)
+    {
+        try
+        {
+            var userName = await UserStateService.GetUserNameAsync();
+            var basket = await BasketService.GetBasketAsync(userName);
+
+            var existingItem = basket.Items.FirstOrDefault(i => i.ProductId == product.Id);
+            if (existingItem != null)
+            {
+                existingItem.Quantity++;
+            }
+            else
+            {
+                basket.Items.Add(new ShoppingCartItemDto
+                {
+                    ProductId = product.Id,
+                    ProductName = product.Name,
+                    Quantity = 1,
+                    Price = product.Price
+                });
+            }
+
+            // Backend sepeti kaydederken TotalPrice ve Discount'ı hesaplayacak
+            basket = await BasketService.StoreBasketAsync(basket);
+            BasketStateService.UpdateItemCount(basket.Items.Sum(i => i.Quantity));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error adding to basket: {ex.Message}");
+        }
+    }
+}
+
+@using Web.UI.Models
+

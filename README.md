@@ -43,12 +43,14 @@ Bu proje, **microservice mimarisini öğrenmek** ve modern teknolojileri pratik 
 ### Proje Özellikleri
 
 - 🏗️ **Microservice Mimarisi**: Her servis bağımsız çalışır
+- 🖥️ **Blazor WebAssembly UI**: Modern web arayüzü
 - 🔄 **CQRS Pattern**: Command ve Query ayrımı
 - 📦 **Docker Compose**: Tek komutla tüm sistem
 - 🚀 **API Gateway**: YARP ile merkezi routing
 - 💾 **Cache-aside Pattern**: Redis ile performans optimizasyonu
 - 📨 **Event-Driven**: RabbitMQ ile asenkron iletişim
 - ⚡ **gRPC**: Yüksek performanslı senkron iletişim
+- 💰 **İndirim Sistemi**: Ürün bazlı indirim yönetimi
 - 🏥 **Health Checks**: Servis sağlık izleme
 
 ---
@@ -73,6 +75,11 @@ Bu proje, **microservice mimarisini öğrenmek** ve modern teknolojileri pratik 
 - **HTTP/2 Cleartext (h2c)** - gRPC over HTTP/2 without TLS
 - **YARP** - Yet Another Reverse Proxy (API Gateway)
 
+### Frontend
+- **Blazor WebAssembly** - Client-side web UI framework
+- **Bootstrap** - CSS framework for responsive design
+- **JavaScript Interop** - Browser API integration
+
 ### Infrastructure
 - **Docker** - Containerization
 - **Docker Compose** - Multi-container orchestration
@@ -93,7 +100,9 @@ Bu proje, **microservice mimarisini öğrenmek** ve modern teknolojileri pratik 
 
 ```mermaid
 graph TB
-    Gateway["🚪 API Gateway<br/>(YARP)<br/>Port: 5000"]
+    UI["🖥️ Blazor WebAssembly UI<br/>Port: 3000"]
+    
+    UI --> Gateway["🚪 API Gateway<br/>(YARP)<br/>Port: 5000"]
     
     Gateway --> Catalog["📦 Catalog API<br/>Port: 5001"]
     Gateway --> Basket["🛒 Basket API<br/>Port: 5002"]
@@ -104,7 +113,7 @@ graph TB
     Basket --> BasketDb[("🗄️ PostgreSQL<br/>BasketDb<br/>(Source)")]
     Basket --> Redis[("⚡ Redis<br/>Cache")]
     
-    Discount["💰 Discount Service<br/>(gRPC)<br/>Port: 5004"] -.->|GetBasket: gRPC<br/>GetDiscount| Basket
+    Discount["💰 Discount Service<br/>(gRPC)<br/>Port: 5004"] -.->|GetDiscount: gRPC| Basket
     DiscountDb[("🗄️ PostgreSQL<br/>DiscountDb")] --> Discount
     
     Basket -->|Checkout: RabbitMQ<br/>async| RabbitMQ["📨 RabbitMQ<br/>Message Broker"]
@@ -112,12 +121,14 @@ graph TB
     
     Ordering --> OrderingDb[("🗄️ PostgreSQL<br/>OrderingDb")]
     
+    classDef uiStyle fill:#0277bd,stroke:#01579b,stroke-width:2px,color:#fff
     classDef gatewayStyle fill:#1565c0,stroke:#0d47a1,stroke-width:2px,color:#fff
     classDef apiStyle fill:#e65100,stroke:#bf360c,stroke-width:2px,color:#fff
     classDef redisStyle fill:#c62828,stroke:#b71c1c,stroke-width:2px,color:#fff
     classDef rabbitmqStyle fill:#6a1b9a,stroke:#4a148c,stroke-width:2px,color:#fff
     classDef dbStyle fill:#2e7d32,stroke:#1b5e20,stroke-width:2px,color:#fff
     
+    class UI uiStyle
     class Gateway gatewayStyle
     class Catalog,Basket,Ordering,Discount apiStyle
     class Redis redisStyle
@@ -157,7 +168,20 @@ Sepet Kaydetme:
 
 ## 🔧 Servisler
 
-### 1. Catalog Service (Ürün Kataloğu)
+### 1. Web UI (Blazor WebAssembly)
+
+**Port:** 3000 (Docker), 5006 (Development)  
+**Açıklama:** Kullanıcı arayüzü
+
+**Özellikler:**
+- Ürün listeleme ve detay görüntüleme
+- Sepet yönetimi (ekleme, güncelleme, silme)
+- Checkout (ödeme) işlemi
+- Sipariş listeleme
+- Responsive tasarım (Bootstrap)
+- API Gateway üzerinden backend servislerle iletişim
+
+### 2. Catalog Service (Ürün Kataloğu)
 
 **Port:** 5001  
 **Database:** PostgreSQL (CatalogDb)  
@@ -169,7 +193,7 @@ Sepet Kaydetme:
 - CRUD operasyonları
 - Swagger UI desteği
 
-### 2. Basket Service (Sepet)
+### 3. Basket Service (Sepet)
 
 **Port:** 5002  
 **Database:** PostgreSQL (BasketDb) + Redis (Cache)  
@@ -179,10 +203,11 @@ Sepet Kaydetme:
 - Sepet oluşturma, güncelleme, silme
 - Redis cache ile performans optimizasyonu
 - gRPC ile indirim sorgulama
+- İndirim hesaplama ve uygulama
 - RabbitMQ ile checkout event gönderme
 - Cache-aside pattern
 
-### 3. Ordering Service (Sipariş)
+### 4. Ordering Service (Sipariş)
 
 **Port:** 5003  
 **Database:** PostgreSQL (OrderingDb)  
@@ -190,11 +215,12 @@ Sepet Kaydetme:
 
 **Özellikler:**
 - RabbitMQ event consumer
-- Sipariş oluşturma
+- Sipariş oluşturma (indirim bilgisi dahil)
 - Sipariş sorgulama
+- Kullanıcı bazlı sipariş listeleme
 - MassTransit ile event handling
 
-### 4. Discount Service (İndirim)
+### 5. Discount Service (İndirim)
 
 **Port:** 5004 (gRPC), 5005 (Health Check)  
 **Database:** PostgreSQL (DiscountDb)  
@@ -202,11 +228,11 @@ Sepet Kaydetme:
 
 **Özellikler:**
 - gRPC servisi (HTTP/2 cleartext)
-- İndirim sorgulama
-- Kupon yönetimi
+- Ürün bazlı indirim sorgulama
+- Kupon yönetimi (CRUD)
 - Yüksek performanslı binary protokol
 
-### 5. Gateway Service (API Gateway)
+### 6. Gateway Service (API Gateway)
 
 **Port:** 5000  
 **Açıklama:** Merkezi API giriş noktası
@@ -214,6 +240,7 @@ Sepet Kaydetme:
 **Özellikler:**
 - YARP reverse proxy
 - Request routing
+- CORS desteği
 - Health check aggregation
 - Single entry point
 
@@ -293,6 +320,8 @@ curl http://localhost:5005/health  # Discount
 
 | Servis | Port | Açıklama |
 |--------|------|----------|
+| Web.UI | 3000 | Blazor WebAssembly UI (Docker) |
+| Web.UI (Dev) | 5006 | Blazor WebAssembly UI (Development) |
 | Gateway.API | 5000 | API Gateway |
 | Catalog.API | 5001 | Ürün servisi |
 | Basket.API | 5002 | Sepet servisi |
@@ -304,6 +333,7 @@ curl http://localhost:5005/health  # Discount
 
 | Servis | URL | Kullanıcı/Şifre |
 |--------|-----|-----------------|
+| Web UI | http://localhost:3000 | - |
 | RabbitMQ Management | http://localhost:15673 | guest / guest |
 | RedisInsight | http://localhost:8001 | - |
 | pgAdmin | http://localhost:5050 | admin@admin.com / admin |
@@ -312,7 +342,23 @@ curl http://localhost:5005/health  # Discount
 
 ## 💻 Kullanım
 
-### API Gateway Üzerinden Erişim
+### Web UI (Önerilen)
+
+Tüm işlemler web arayüzü üzerinden yapılabilir:
+
+1. **Web UI'yi açın:**
+   ```
+   http://localhost:3000
+   ```
+
+2. **İşlemler:**
+   - Ürünleri görüntüleme
+   - Sepete ürün ekleme
+   - Sepet yönetimi (adet güncelleme, silme)
+   - Checkout (ödeme) işlemi
+   - Sipariş geçmişi görüntüleme
+
+### API Gateway Üzerinden Erişim (REST API)
 
 Tüm API'lere Gateway üzerinden erişilir:
 
@@ -333,7 +379,7 @@ curl -X POST http://localhost:5000/basket-service/api/baskets \
     }]
   }'
 
-# Sepeti getir (indirim uygulanmış)
+# Sepeti getir (indirim otomatik uygulanmış)
 curl http://localhost:5000/basket-service/api/baskets/testuser
 
 # Checkout (sipariş oluştur)
@@ -421,7 +467,33 @@ curl http://localhost:5003/health
 curl http://localhost:5005/health
 ```
 
-### End-to-End Test Senaryosu
+### End-to-End Test Senaryosu (Web UI)
+
+1. **Web UI'yi açın:**
+   ```
+   http://localhost:3000
+   ```
+
+2. **Ürünleri görüntüleyin:**
+   - Ana sayfada ürün listesi görüntülenir
+
+3. **Sepete ürün ekleyin:**
+   - Ürün kartında "Sepete Ekle" butonuna tıklayın
+   - İndirim otomatik olarak uygulanır
+
+4. **Sepeti görüntüleyin:**
+   - Sepet sayfasında toplam fiyat ve indirim görüntülenir
+   - Ürün adetini güncelleyebilir veya silebilirsiniz
+
+5. **Checkout yapın:**
+   - "Ödemeye Geç" butonuna tıklayın
+   - Ödeme bilgilerini girin
+   - Siparişi tamamlayın
+
+6. **Siparişleri görüntüleyin:**
+   - "Siparişlerim" sayfasından sipariş geçmişinizi görüntüleyebilirsiniz
+
+### End-to-End Test Senaryosu (REST API)
 
 1. **Ürün listesini al:**
 ```bash
@@ -443,7 +515,7 @@ curl -X POST http://localhost:5000/basket-service/api/baskets \
   }'
 ```
 
-3. **Sepeti getir (indirim uygulanmış olmalı):**
+3. **Sepeti getir (indirim otomatik uygulanmış olmalı):**
 ```bash
 curl http://localhost:5000/basket-service/api/baskets/testuser
 ```
@@ -477,6 +549,9 @@ microservice-practice-me/
 │   │   │   └── Ordering.API/
 │   │   └── Discount/
 │   │       └── Discount.Grpc/
+│   │
+│   ├── Clients/
+│   │   └── Web.UI/                # Blazor WebAssembly UI
 │   │
 │   ├── ApiGateway/
 │   │   └── Gateway.API/

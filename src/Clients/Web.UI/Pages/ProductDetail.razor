@@ -1,0 +1,112 @@
+@page "/product/{id:guid}"
+@inject ICatalogService CatalogService
+@inject IBasketService BasketService
+@inject UserStateService UserStateService
+@inject BasketStateService BasketStateService
+@inject NavigationManager Navigation
+
+<PageTitle>@(product?.Name ?? "Ürün Detayı")</PageTitle>
+
+<div class="container mt-4">
+    @if (product == null)
+    {
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="row">
+            <div class="col-md-6">
+                @if (!string.IsNullOrEmpty(product.ImageUrl))
+                {
+                    <img src="@product.ImageUrl" class="img-fluid" alt="@product.Name">
+                }
+                else
+                {
+                    <div class="bg-secondary d-flex align-items-center justify-content-center" style="height: 400px;">
+                        <span class="text-white">Resim Yok</span>
+                    </div>
+                }
+            </div>
+            <div class="col-md-6">
+                <h1>@product.Name</h1>
+                <p class="text-muted">Kategori: @product.CategoryName</p>
+                <h3 class="text-primary">@product.Price.ToString("C")</h3>
+                <p>@(product.Description ?? "Açıklama yok")</p>
+                
+                <div class="mb-3">
+                    <label for="quantity" class="form-label">Miktar:</label>
+                    <input type="number" class="form-control" id="quantity" @bind="quantity" min="1" style="max-width: 100px;" />
+                </div>
+                
+                <button class="btn btn-primary btn-lg" @onclick="AddToBasket">
+                    Sepete Ekle (@quantity adet)
+                </button>
+                <a href="/" class="btn btn-secondary btn-lg ms-2">Geri Dön</a>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private ProductDto? product;
+    private int quantity = 1;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            product = await CatalogService.GetProductByIdAsync(Id);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading product: {ex.Message}");
+        }
+    }
+
+    private async Task AddToBasket()
+    {
+        if (product == null) return;
+
+        try
+        {
+            var userName = await UserStateService.GetUserNameAsync();
+            var basket = await BasketService.GetBasketAsync(userName);
+
+            var existingItem = basket.Items.FirstOrDefault(i => i.ProductId == product.Id);
+            if (existingItem != null)
+            {
+                existingItem.Quantity += quantity;
+            }
+            else
+            {
+                basket.Items.Add(new ShoppingCartItemDto
+                {
+                    ProductId = product.Id,
+                    ProductName = product.Name,
+                    Quantity = quantity,
+                    Price = product.Price
+                });
+            }
+
+            // Backend sepeti kaydederken TotalPrice ve Discount'ı hesaplayacak
+            basket = await BasketService.StoreBasketAsync(basket);
+            BasketStateService.UpdateItemCount(basket.Items.Sum(i => i.Quantity));
+            
+            Navigation.NavigateTo("/basket");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error adding to basket: {ex.Message}");
+        }
+    }
+}
+
+@using Web.UI.Models
+
