@@ -1,0 +1,3 @@
+=> Order ksımında redis yok o kısma da redis eklicez. 
+    => kullanıcı siparişlerine gittiğinde DB den çek sonrasında redise yaz.  
+    => sipariş verdiğinde Order db kaydet ve redisi sil
