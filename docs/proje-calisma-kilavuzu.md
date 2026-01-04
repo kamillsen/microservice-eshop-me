@@ -104,6 +104,7 @@ docker compose up -d
 - `ordering.api` → Ordering API (port 5003)
 - `discount.grpc` → Discount gRPC Service (port 5004/5005)
 - `gateway.api` → API Gateway (port 5000)
+- `web.ui` → Web UI (Blazor) (port 3000)
 
 **Başlatma Adımları:**
 ```bash
@@ -628,7 +629,7 @@ docker compose up -d
 
 **Başarılı Başlatma Çıktısı:**
 ```
-[+] Running 12/12
+[+] Running 13/13
  ✔ Container discountdb      Started
  ✔ Container orderingdb      Started
  ✔ Container catalogdb      Started
@@ -641,6 +642,7 @@ docker compose up -d
  ✔ Container basket.api      Started
  ✔ Container ordering.api     Started
  ✔ Container gateway.api     Started
+ ✔ Container web.ui          Started
 ```
 
 ### Adım 2: Container Durumlarını Kontrol Et
@@ -738,6 +740,14 @@ Her servisin kendi Swagger UI'ı vardır:
 - **Ordering API:** http://localhost:5003/
 
 **Not:** Gateway üzerinden Swagger UI erişimi yoktur. Doğrudan servis portlarından erişilir.
+
+### Web UI
+
+Blazor WebAssembly kullanıcı arayüzü:
+
+- **Web UI:** http://localhost:3000/
+
+**Not:** Web UI, API Gateway üzerinden backend servislerine bağlanır.
 
 ---
 
@@ -1372,6 +1382,7 @@ docker ps
 | `ordering.api` | Ordering API | 5003 | 8080 | http://localhost:5003 |
 | `discount.grpc` | Discount gRPC | 5004 | 8080 | - |
 | `discount.grpc` | Discount Health | 5005 | 8081 | http://localhost:5005/health |
+| `web.ui` | Web UI (Blazor) | 3000 | 80 | http://localhost:3000 |
 
 ---
 
@@ -1405,6 +1416,9 @@ curl http://localhost:5000/catalog-service/api/categories
 # Catalog: http://localhost:5001/
 # Basket: http://localhost:5002/
 # Ordering: http://localhost:5003/
+
+# Web UI
+# http://localhost:3000/
 ```
 
 **Durdurma:**
