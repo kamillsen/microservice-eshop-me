@@ -1,35 +1,613 @@
-# 🎯 **MediatR Pipeline ve GlobalExceptionHandler - GENİŞLETİLMİŞ KILAVUZ**
+# 🎯 MediatR Pipeline ve GlobalExceptionHandler - Kapsamlı Kılavuz
 
 ## 📋 İçindekiler
-1. [Temel Kavramlar](#temel-kavramlar)
-2. [MediatR Pipeline Akışı](#mediatr-pipeline-akışı)
-3. [GlobalExceptionHandler Nasıl Çalışır?](#globalexceptionhandler-nasıl-çalışır)
-4. [Controller'da Try-Catch Durumu](#controllerda-try-catch-durumu)
-5. [Exception Nasıl Fırlatılır ve Yakalanır?](#exception-nasıl-fırlatılır-ve-yakalanır)
-6. [🔥 Async Metotlar Otomatik Exception Fırlatabilir](#-async-metotlar-otomatik-exception-fırlatabilir)
-7. [Repository'de Exception Fırlatma Analizi](#repositoryde-exception-fırlatma-analizi)
-8. [Exception Yakalama Şartları](#exception-yakalama-şartları)
-9. [Senin Projende Özel Durumlar](#senin-projende-özel-durumlar)
-10. [Debug ve Test Yöntemleri](#debug-ve-test-yöntemleri)
-11. [En İyi Pratikler](#en-iyi-pratikler)
+1. [Temel Kavramlar](#1-temel-kavramlar)
+2. [Sistem Nasıl Çalışır? - Genel Akış](#2-sistem-nasıl-çalışır---genel-akış)
+3. [HttpContext ve Middleware Pipeline](#3-httpcontext-ve-middleware-pipeline)
+4. [Interface Pattern ve Dependency Inversion Principle](#4-interface-pattern-ve-dependency-inversion-principle)
+5. [GlobalExceptionHandler Kurulumu ve Çalışma Mantığı](#5-globalexceptionhandler-kurulumu-ve-çalışma-mantığı)
+6. [MediatR Pipeline ve Exception Akışı](#6-mediatr-pipeline-ve-exception-akışı)
+7. [Exception Nasıl Fırlatılır ve Yakalanır?](#7-exception-nasıl-fırlatılır-ve-yakalanır)
+8. [Pratik Senaryolar ve Örnekler](#8-pratik-senaryolar-ve-örnekler)
+9. [En İyi Pratikler ve Öneriler](#9-en-iyi-pratikler-ve-öneriler)
 
 ---
 
-## 🎯 **TEMEL KAVRAMLAR**
+## 1. Temel Kavramlar
 
-### **MediatR Nedir?**
+### 1.1 MediatR Nedir?
+
 **Analoji:** Santral Operatörü - Gelen çağrıları doğru departmana bağlar
-**Teknik:** Controller'lar ile handler'lar arasında aracılık yapan mediator pattern implementasyonu
 
-### **GlobalExceptionHandler Nedir?**
+**Teknik Açıklama:**
+- Controller'lar ile handler'lar arasında aracılık yapan mediator pattern implementasyonu
+- Controller sadece `_mediator.Send(command)` çağırır
+- MediatR, command tipine bakarak doğru handler'ı bulur
+- Handler iş mantığını çalıştırır ve sonucu döner
+- Bu sayede Controller ve Handler arasında gevşek bağlantı (loose coupling) sağlanır
+
+**Faydaları:**
+- ✅ Controller'lar handler'ları doğrudan bilmek zorunda kalmaz
+- ✅ İş mantığı handler'larda toplanır
+- ✅ Pipeline behavior'ları (logging, validation) merkezi yönetilir
+
+### 1.2 GlobalExceptionHandler Nedir?
+
 **Analoji:** Hastane Acil Servisi - Tüm acil vakaları tek merkezde yönetir
-**Teknik:** Yakalanmamış exception'ları yakalayıp HTTP response'una çeviren ASP.NET Core middleware'i
+
+**Teknik Açıklama:**
+- Yakalanmamış exception'ları yakalayıp HTTP response'una çeviren ASP.NET Core middleware'i
+- `IExceptionHandler` interface'ini implement eder
+- Exception tipine göre uygun HTTP status code ve ProblemDetails oluşturur
+- Tüm servislerde standart hata formatı sağlar
+
+**Faydaları:**
+- ✅ Merkezi exception handling
+- ✅ Standart hata formatı (RFC 7807 - ProblemDetails)
+- ✅ HTTP status code mapping
+- ✅ Güvenlik (stack trace göstermez)
+
+### 1.3 HttpContext Nedir?
+
+**Analoji:** Bir müşteri talebi geldiğinde, o talebe ait tüm bilgilerin tek bir dosyada toplanması
+
+**Teknik Açıklama:**
+- Her HTTP request için ASP.NET Core tarafından oluşturulan context nesnesi
+- Request, Response, User, Items, RequestServices içerir
+- Kestrel Server tarafından oluşturulur
+- Middleware Pipeline tarafından yakalanır ve aktarılır
+
+**İçeriği:**
+```csharp
+public class HttpContext
+{
+    public HttpRequest Request { get; }           // Gelen istek bilgileri
+    public HttpResponse Response { get; }        // Gönderilecek cevap bilgileri
+    public ClaimsPrincipal User { get; }          // Kullanıcı bilgileri
+    public IDictionary<object, object> Items { get; }  // Request boyunca kullanılabilecek key-value çiftleri
+    public IServiceProvider RequestServices { get; }   // DI container'a erişim
+}
+```
+
+### 1.4 Middleware Pipeline Nedir?
+
+**Analoji:** Bir fabrika hattı - her istasyon (middleware) ürünü (request) işler ve bir sonrakine aktarır
+
+**Teknik Açıklama:**
+- HTTP request ve response pipeline'ında çalışan küçük bileşenler zinciri
+- Her middleware, request'i işleyebilir, değiştirebilir veya bir sonraki middleware'e aktarabilir
+- HttpContext her middleware'e parametre olarak aktarılır
+- ExceptionHandlerMiddleware exception'ları yakalar
+
+### 1.5 IExceptionHandler Interface Nedir?
+
+**Analoji:** Standart Priz Sistemi - Herhangi bir cihaz (handler) standart prize (interface) takılabilir
+
+**Teknik Açıklama:**
+- ASP.NET Core'un exception handling için sağladığı interface (.NET 8+)
+- `IExceptionHandler` implement eden sınıflar, yakalanmamış exception'ları işler
+- Dependency Inversion Principle (DIP) prensibine uyum sağlar
+
+**Neden Interface?**
+- ✅ Esneklik: Farklı handler'lar kullanılabilir
+- ✅ Test edilebilirlik: Mock interface ile test edilebilir
+- ✅ Genişletilebilirlik: Yeni handler'lar eklenebilir
 
 ---
 
-## 🔄 **MEDIATR PIPELINE AKIŞI**
+## 2. Sistem Nasıl Çalışır? - Genel Akış
 
-### **Teknik Akış:**
+### 2.1 Tam Akış Diyagramı
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ 1. HTTP Request Gelir                                    │
+│    GET /api/products                                     │
+└─────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────┐
+│ 2. Kestrel Server                                       │
+│    HttpContext oluşturulur                              │
+│    - Request.Path = "/api/products"                    │
+│    - Response.StatusCode = 200 (başlangıç)              │
+│    - RequestServices = ServiceProvider (DI container)   │
+└─────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────┐
+│ 3. Middleware Pipeline                                   │
+│    app.UseExceptionHandler()  ← Exception yakalama      │
+│    app.UseHttpsRedirection()                            │
+│    app.UseAuthentication()                              │
+│    app.UseAuthorization()                               │
+│    app.MapControllers()                                  │
+└─────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────┐
+│ 4. Controller                                           │
+│    [HttpGet]                                            │
+│    public async Task<IActionResult> GetProducts()        │
+│    {                                                     │
+│        var result = await _mediator.Send(query);        │
+│        return Ok(result);                                │
+│    }                                                     │
+└─────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────┐
+│ 5. MediatR Pipeline                                     │
+│    LoggingBehavior → ValidationBehavior → Handler        │
+│    (Exception fırlatılabilir burada)                    │
+└─────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────┐
+│ 6. Exception Fırlatıldı (Örnek: NotFoundException)      │
+│    throw new NotFoundException("Product not found");     │
+└─────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────┐
+│ 7. ExceptionHandlerMiddleware                           │
+│    catch (Exception ex) {                               │
+│        var handler = context.RequestServices           │
+│            .GetRequiredService<IExceptionHandler>();    │
+│        await handler.TryHandleAsync(context, ex);       │
+│    }                                                     │
+└─────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────┐
+│ 8. GlobalExceptionHandler                               │
+│    TryHandleAsync(HttpContext, Exception)                │
+│    - Exception tipine göre ProblemDetails oluştur      │
+│    - httpContext.Response.StatusCode = 404              │
+│    - httpContext.Response.WriteAsJsonAsync(...)         │
+└─────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────┐
+│ 9. HTTP Response                                        │
+│    Status: 404 Not Found                                 │
+│    Content-Type: application/problem+json                │
+│    Body: {                                              │
+│      "type": "...",                                      │
+│      "title": "Not Found",                               │
+│      "status": 404,                                      │
+│      "detail": "Product not found"                       │
+│    }                                                     │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 2.2 Özet Akış
+
+1. **HTTP Request** → Kestrel Server tarafından alınır
+2. **HttpContext Oluşturma** → Her request için yeni HttpContext oluşturulur
+3. **Middleware Pipeline** → HttpContext pipeline'dan geçer
+4. **Controller** → Request'i alır ve MediatR'a yönlendirir
+5. **MediatR Pipeline** → Logging → Validation → Handler
+6. **Exception Fırlatma** → Handler veya Repository'de exception fırlatılabilir
+7. **Exception Yakalama** → ExceptionHandlerMiddleware yakalar
+8. **Exception İşleme** → GlobalExceptionHandler exception'ı işler
+9. **HTTP Response** → ProblemDetails formatında döner
+
+---
+
+## 3. HttpContext ve Middleware Pipeline
+
+### 3.1 HttpContext Nasıl Oluşturulur?
+
+**Oluşturan:** ASP.NET Core'un web server'ı (Kestrel/HttpListener)
+
+**Akış:**
+```
+1. HTTP Request gelir (örn: GET /api/products)
+   ↓
+2. Kestrel Server request'i alır
+   ↓
+3. HttpContext nesnesi oluşturulur
+   - Request.Path = "/api/products"
+   - Request.Method = "GET"
+   - Response.StatusCode = 200 (başlangıç)
+   - RequestServices = ServiceProvider (DI container)
+   ↓
+4. HttpContext middleware pipeline'a aktarılır
+```
+
+**Kod Seviyesinde (Framework İçi):**
+```csharp
+// ASP.NET Core Framework içinde (sen görmüyorsun)
+public class KestrelServer
+{
+    public async Task ProcessRequestAsync(HttpContext context)
+    {
+        // Her HTTP request için yeni HttpContext oluşturulur
+        context.Request.Path = "/api/products";
+        context.Request.Method = "GET";
+        context.Response.StatusCode = 200; // Başlangıç değeri
+        context.RequestServices = _serviceProvider; // DI container
+        
+        // Middleware pipeline'a aktar
+        await _middlewarePipeline.InvokeAsync(context);
+    }
+}
+```
+
+### 3.2 Middleware Pipeline Nasıl Çalışır?
+
+**Yapı:**
+```csharp
+// Program.cs'de middleware'ler sırayla eklenir:
+app.UseExceptionHandler();      // 1. Exception handling
+app.UseHttpsRedirection();      // 2. HTTPS yönlendirme
+app.UseAuthentication();         // 3. Kimlik doğrulama
+app.UseAuthorization();         // 4. Yetkilendirme
+app.MapControllers();           // 5. Controller routing
+```
+
+**Pipeline Görseli:**
+```
+HTTP Request
+    ↓
+┌─────────────────────────────────────┐
+│ UseExceptionHandler()               │ ← 1. Exception yakalama
+│   try {                             │
+│     ↓                               │
+│   ┌─────────────────────────────┐ │
+│   │ UseHttpsRedirection()       │ │ ← 2. HTTPS yönlendirme
+│   │   ↓                         │ │
+│   │ ┌─────────────────────────┐ │ │
+│   │ │ UseAuthentication()      │ │ │ ← 3. Kimlik doğrulama
+│   │ │   ↓                     │ │ │
+│   │ │ ┌─────────────────────┐ │ │ │
+│   │ │ │ UseAuthorization()  │ │ │ │ ← 4. Yetkilendirme
+│   │ │ │   ↓                 │ │ │ │
+│   │ │ │ ┌─────────────────┐ │ │ │ │
+│   │ │ │ │ MapControllers() │ │ │ │ │ ← 5. Controller
+│   │ │ │ │   ↓              │ │ │ │ │
+│   │ │ │ │ Controller       │ │ │ │ │
+│   │ │ │ │   ↓              │ │ │ │ │
+│   │ │ │ └─────────────────┘ │ │ │ │
+│   │ │ └─────────────────────┘ │ │ │
+│   │ └─────────────────────────┘ │ │
+│   └─────────────────────────────┘ │
+└─────────────────────────────────────┘
+    ↓
+HTTP Response
+```
+
+**HttpContext Aktarımı:**
+```csharp
+// Her middleware HttpContext'i alır ve bir sonrakine aktarır
+public class MiddlewarePipeline
+{
+    public async Task InvokeAsync(HttpContext context) // ← HttpContext burada!
+    {
+        // Her middleware'e context aktarılır
+        await middleware1.InvokeAsync(context);
+        await middleware2.InvokeAsync(context);
+        // ...
+    }
+}
+```
+
+### 3.3 HttpContext'i Kim Yakalıyor?
+
+**Kısa Cevap:**
+1. **Oluşturan:** Kestrel Server
+2. **Yakalayan:** Middleware Pipeline
+3. **Kullanan:** Her middleware ve Controller'lar
+
+**Detaylı Akış:**
+```
+1. HTTP Request gelir
+   ↓
+2. Kestrel/HttpListener → HttpContext oluşturur
+   ↓
+3. Middleware Pipeline başlar
+   ↓
+4. Her middleware'e HttpContext aktarılır
+   ↓
+5. ExceptionHandlerMiddleware exception yakalar
+   ↓
+6. HttpContext'i IExceptionHandler'a verir
+```
+
+**Önemli Noktalar:**
+- ✅ HttpContext her request için yeni oluşturulur (scoped)
+- ✅ Dependency Injection ile değil, pipeline mekanizması ile aktarılır
+- ✅ Her middleware `InvokeAsync(HttpContext context)` metodunu alır
+
+---
+
+## 4. Interface Pattern ve Dependency Inversion Principle
+
+### 4.1 Neden Interface Kullanılıyor?
+
+.NET'te sürekli interface'lerle karşılaşmanın nedeni, **Dependency Inversion Principle (DIP)** prensibine uyulmasıdır. Bu, SOLID prensiplerinden biridir.
+
+### 4.2 Sorun: Interface Olmadan Ne Olurdu?
+
+```csharp
+// ❌ KÖTÜ YAKLAŞIM: Interface olmadan
+public class ExceptionHandlerMiddleware
+{
+    // GlobalExceptionHandler'a direkt bağımlı!
+    private readonly GlobalExceptionHandler _handler;
+    
+    public ExceptionHandlerMiddleware(GlobalExceptionHandler handler)
+    {
+        _handler = handler; // ← Sıkı bağlantı (tight coupling)
+    }
+    
+    public async Task InvokeAsync(HttpContext context)
+    {
+        try
+        {
+            await _next(context);
+        }
+        catch (Exception ex)
+        {
+            // Sadece GlobalExceptionHandler kullanabilirsin!
+            await _handler.TryHandleAsync(context, ex);
+        }
+    }
+}
+```
+
+**Sorunlar:**
+- ❌ Farklı bir handler kullanmak istersen middleware'i değiştirmen gerekir
+- ❌ Test etmek zor (mock yapamazsın)
+- ❌ Esnek değil
+
+### 4.3 Çözüm: Interface ile
+
+```csharp
+// ✅ İYİ YAKLAŞIM: Interface ile
+public class ExceptionHandlerMiddleware
+{
+    // Interface'e bağımlı, somut sınıfa değil!
+    private readonly IExceptionHandler _handler;
+    
+    public ExceptionHandlerMiddleware(IExceptionHandler handler)
+    {
+        _handler = handler; // ← Gevşek bağlantı (loose coupling)
+    }
+    
+    public async Task InvokeAsync(HttpContext context)
+    {
+        try
+        {
+            await _next(context);
+        }
+        catch (Exception ex)
+        {
+            // Herhangi bir IExceptionHandler implementasyonu kullanabilir!
+            await _handler.TryHandleAsync(context, ex);
+        }
+    }
+}
+```
+
+**Faydalar:**
+- ✅ **Esneklik:** Farklı handler'lar kullanabilirsin
+- ✅ **Test edilebilirlik:** Mock interface ile test edebilirsin
+- ✅ **Genişletilebilirlik:** Yeni handler'lar ekleyebilirsin
+- ✅ **Bağımlılık tersine çevrilir:** Middleware, somut sınıfa değil interface'e bağımlı
+
+### 4.4 Dependency Inversion Principle (DIP) Nedir?
+
+**Tanım:** 
+- Üst seviye modüller, alt seviye modüllere bağımlı olmamalı
+- İkisi de **abstraction'lara (interface)** bağımlı olmalı
+
+**Bu örnekte:**
+- **Üst seviye:** `ExceptionHandlerMiddleware`
+- **Alt seviye:** `GlobalExceptionHandler`
+- **Abstraction:** `IExceptionHandler`
+
+**Mantık:**
+```
+ExceptionHandlerMiddleware (üst seviye)
+    ↓ bağımlı
+IExceptionHandler (abstraction/interface)
+    ↑ implement eder
+GlobalExceptionHandler (alt seviye)
+```
+
+### 4.5 Gerçek Hayat Benzetmesi
+
+**Interface Olmadan:**
+- Priz sadece belirli bir marka cihazı kabul eder
+- Farklı bir cihaz kullanmak istersen prizi değiştirmen gerekir
+
+**Interface ile:**
+- Priz standart bir şekil (interface) kabul eder
+- Bu standarda uyan her cihaz çalışır
+- Priz değişmeden farklı cihazlar kullanabilirsin
+
+---
+
+## 5. GlobalExceptionHandler Kurulumu ve Çalışma Mantığı
+
+### 5.1 ⚠️ KRİTİK: Program.cs'de 3 Satır ZORUNLU!
+
+Exception'ın yakalanabilmesi için Program.cs'de **3 satırın** mutlaka olması gerekir:
+
+```csharp
+// Program.cs'de:
+
+// 1. Handler'ı DI container'a kaydet:
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+// ↑ Bu satır şunu yapar:
+// builder.Services.AddSingleton<IExceptionHandler, GlobalExceptionHandler>();
+
+// 2. ProblemDetails desteğini ekle (opsiyonel ama önerilir):
+builder.Services.AddProblemDetails();
+// ↑ ProblemDetails formatını destekler (RFC 7807)
+
+// 3. Middleware'ı aktif et:
+app.UseExceptionHandler();
+// ↑ ASP.NET Core'un exception yakalama sistemini açar
+```
+
+**Bu 3 satırdan biri eksikse, GlobalExceptionHandler ÇALIŞMAZ!**
+
+### 5.2 3 Aşamalı Sistem
+
+#### Aşama 1: `app.UseExceptionHandler()` - Exception Yakalama Middleware'i
+
+**Ne Yapar?**
+- ASP.NET Core pipeline'ına exception yakalama middleware'i ekler
+- Pipeline'daki herhangi bir yerde fırlatılan ve yakalanmamış exception'ları yakalar
+
+**Arka Planda Ne Oluyor?**
+```csharp
+// ASP.NET Core'un içindeki ExceptionHandlerMiddleware:
+public class ExceptionHandlerMiddleware
+{
+    private readonly RequestDelegate _next;
+    private readonly ILogger<ExceptionHandlerMiddleware> _logger;
+    
+    public async Task InvokeAsync(HttpContext context) // ← HttpContext burada!
+    {
+        try
+        {
+            await _next(context); // ← HttpContext bir sonraki middleware'e aktarılır
+        }
+        catch (Exception exception) // ← BURADA YAKALANIR!
+        {
+            // DI'dan IExceptionHandler al (HttpContext.RequestServices kullanarak)
+            var handler = context.RequestServices
+                .GetRequiredService<IExceptionHandler>();
+            
+            // HttpContext'i handler'a ver ve TryHandleAsync'ı çağır
+            await handler.TryHandleAsync(context, exception, cancellationToken);
+            //                      ↑ HttpContext burada handler'a aktarılır
+        }
+    }
+}
+```
+
+**Akış:**
+1. `UseExceptionHandler()` → `ExceptionHandlerMiddleware` pipeline'a eklenir
+2. Her HTTP request için Kestrel Server bir `HttpContext` oluşturur
+3. `HttpContext` middleware pipeline'dan geçer
+4. Controller çalışırken exception fırlatılırsa
+5. `ExceptionHandlerMiddleware`'in `catch` bloğu yakalar
+6. `HttpContext.RequestServices` üzerinden DI'dan `IExceptionHandler` alınır (senin `GlobalExceptionHandler`'ın)
+7. `HttpContext` ile birlikte `TryHandleAsync()` çağrılır
+8. `GlobalExceptionHandler` `HttpContext.Response`'i kullanarak HTTP response oluşturur
+
+#### Aşama 2: `builder.Services.AddExceptionHandler<GlobalExceptionHandler>()` - DI Kaydı
+
+**Ne Yapar?**
+- GlobalExceptionHandler'ı `IExceptionHandler` olarak DI container'a kaydeder
+- Böylece yakalanan exception'lar bu handler'a yönlendirilir
+
+**Kod Seviyesinde:**
+```csharp
+// AddExceptionHandler() metodunun yaptığı:
+builder.Services.AddSingleton<IExceptionHandler, GlobalExceptionHandler>();
+// ↑ GlobalExceptionHandler'ı IExceptionHandler olarak kaydeder
+// ExceptionHandlerMiddleware, DI'dan IExceptionHandler'ı alırken
+// senin GlobalExceptionHandler'ını bulur
+```
+
+#### Aşama 3: `GlobalExceptionHandler` Sınıfı - Exception İşleyici
+
+**Ne Yapar?**
+- Yakalanan exception'ı analiz eder
+- Tipine göre uygun HTTP status code ve ProblemDetails oluşturur
+- Kullanıcıya JSON formatında döner
+
+**Kod:**
+```csharp
+public class GlobalExceptionHandler : IExceptionHandler
+{
+    private readonly ILogger<GlobalExceptionHandler> _logger;
+    
+    public GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger)
+    {
+        _logger = logger;
+    }
+    
+    public async ValueTask<bool> TryHandleAsync(
+        HttpContext httpContext, // ← HttpContext burada! ExceptionHandlerMiddleware'den gelir
+        Exception exception,     // ← GELEN EXCEPTION
+        CancellationToken cancellationToken)
+    {
+        // 1. Exception'ı logla
+        _logger.LogError(exception, "Exception occurred: {Message}", exception.Message);
+        
+        // 2. Exception tipine bak (HttpContext'i de kullanarak)
+        var problemDetails = CreateProblemDetails(exception, httpContext);
+        
+        // 3. HttpContext.Response kullanarak HTTP Response oluştur
+        httpContext.Response.StatusCode = problemDetails.Status ?? 500;
+        httpContext.Response.ContentType = "application/problem+json";
+        
+        // 4. JSON response yaz
+        var json = JsonSerializer.Serialize(problemDetails);
+        await httpContext.Response.WriteAsync(json, cancellationToken);
+        
+        return true; // "Exception'ı ben handle ettim"
+    }
+    
+    private static ProblemDetails CreateProblemDetails(
+        Exception exception, 
+        HttpContext httpContext) // ← HttpContext burada da kullanılıyor
+    {
+        return exception switch
+        {
+            NotFoundException notFound => new ProblemDetails
+            {
+                Status = 404,
+                Title = "Not Found",
+                Detail = notFound.Message,
+                Instance = httpContext.Request.Path // ← HttpContext.Request kullanımı
+            },
+            BadRequestException badRequest => new ProblemDetails
+            {
+                Status = 400,
+                Title = "Bad Request",
+                Detail = badRequest.Message,
+                Instance = httpContext.Request.Path
+            },
+            InternalServerException internalServer => new ProblemDetails
+            {
+                Status = 500,
+                Title = "Internal Server Error",
+                Detail = internalServer.Message,
+                Instance = httpContext.Request.Path
+            },
+            _ => new ProblemDetails
+            {
+                Status = 500,
+                Title = "An error occurred while processing your request",
+                Detail = "An unexpected error occurred",
+                Instance = httpContext.Request.Path
+            }
+        };
+    }
+}
+```
+
+**HttpContext Kullanımı:**
+- ✅ `httpContext.Request.Path` → Request path bilgisi (ProblemDetails.Instance için)
+- ✅ `httpContext.Response.StatusCode` → HTTP status code ayarlama
+- ✅ `httpContext.Response.ContentType` → Response content type ayarlama
+- ✅ `httpContext.Response.WriteAsync()` → JSON response yazma
+- ✅ `httpContext.RequestServices` → DI container'a erişim (gerekirse)
+
+### 5.3 `builder.Services.AddProblemDetails()` - ProblemDetails Desteği (Opsiyonel)
+
+**Ne İşe Yarar?**
+- ProblemDetails formatını destekler (RFC 7807 standardı)
+- Standart hata formatı sağlar
+- Swagger/OpenAPI entegrasyonu için faydalıdır
+- Opsiyoneldir ama önerilir
+
+---
+
+## 6. MediatR Pipeline ve Exception Akışı
+
+### 6.1 MediatR Pipeline Akışı
+
 ```
 HTTP Request → Controller → _mediator.Send(command)
     ↓
@@ -41,7 +619,8 @@ MediatR Pipeline:
 Response → Controller → HTTP Response
 ```
 
-### **ValidationBehavior Kod Analizi:**
+### 6.2 ValidationBehavior ve Exception Fırlatma
+
 ```csharp
 public async Task<TResponse> Handle(TRequest request, ...)
 {
@@ -60,236 +639,50 @@ public async Task<TResponse> Handle(TRequest request, ...)
 }
 ```
 
----
+### 6.3 Exception Akışı (MediatR'dan GlobalExceptionHandler'a)
 
-## 🚨 **GLOBALEXCEPTIONHANDLER NASIL ÇALIŞIR?**
-
-### **⚠️ KRİTİK: Program.cs'de 3 Satır ZORUNLU!**
-
-Exception'ın yakalanabilmesi için Program.cs'de **3 satırın** mutlaka olması gerekir:
-
-```csharp
-// Program.cs'de:
-
-// 1. Handler'ı kaydet:
-builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
-// ↑ DI container'a IExceptionHandler olarak kaydeder
-
-// 2. ProblemDetails desteğini ekle (opsiyonel ama önerilir):
-builder.Services.AddProblemDetails();
-// ↑ ProblemDetails formatını destekler
-
-// 3. Middleware'ı aktif et:
-app.UseExceptionHandler();
-// ↑ ASP.NET Core'un exception yakalama sistemini açar
 ```
-
-**Bu 3 satırdan biri eksikse, GlobalExceptionHandler ÇALIŞMAZ!**
-
----
-
-### **3 Aşamalı Sistem:**
-
-#### **1. `app.UseExceptionHandler()` - Exception Yakalama Middleware'i**
-```csharp
-// Program.cs'de:
-app.UseExceptionHandler();
-```
-**Analoji:** Güvenlik Kamerası - Tüm olayları kaydeder ve merkeze bildirir
-**Teknik:** ASP.NET Core pipeline'ına exception yakalama middleware'i ekler. Pipeline'daki herhangi bir yerde fırlatılan ve yakalanmamış exception'ları yakalar.
-
-**Arka Planda Ne Oluyor?**
-```csharp
-// ASP.NET Core'un içindeki ExceptionHandlerMiddleware:
-public class ExceptionHandlerMiddleware
-{
-    private readonly RequestDelegate _next;
-    private readonly IExceptionHandler _handler; // ← DI'dan gelir
-    
-    public async Task Invoke(HttpContext context)
-    {
-        try
-        {
-            await _next(context); // ← Controller'ı çalıştır
-        }
-        catch (Exception exception) // ← BURADA YAKALANIR!
-        {
-            // DI'dan IExceptionHandler al
-            var handler = context.RequestServices
-                .GetRequiredService<IExceptionHandler>();
-            
-            // TryHandleAsync'ı çağır
-            await handler.TryHandleAsync(context, exception, cancellationToken);
-        }
-    }
-}
-```
-
-**Akış:**
-1. `UseExceptionHandler()` → `ExceptionHandlerMiddleware` pipeline'a eklenir
-2. Controller çalışırken exception fırlatılırsa
-3. `ExceptionHandlerMiddleware`'in `catch` bloğu yakalar
-4. DI'dan `IExceptionHandler` alınır (senin `GlobalExceptionHandler`'ın)
-5. `TryHandleAsync()` çağrılır
-
-#### **2. `builder.Services.AddExceptionHandler<GlobalExceptionHandler>()` - DI Kaydı**
-```csharp
-// Program.cs'de:
-builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
-```
-**Analoji:** Doktor Randevu Sistemi - Hangi doktorun hangi vakayı alacağını belirler
-**Teknik:** GlobalExceptionHandler'ı IExceptionHandler olarak DI container'a kaydeder. Böylece yakalanan exception'lar bu handler'a yönlendirilir.
-
-**Ne Yapıyor?**
-```csharp
-// AddExceptionHandler() metodunun yaptığı:
-builder.Services.AddSingleton<IExceptionHandler, GlobalExceptionHandler>();
-// ↑ GlobalExceptionHandler'ı IExceptionHandler olarak kaydeder
-// ExceptionHandlerMiddleware, DI'dan IExceptionHandler'ı alırken
-// senin GlobalExceptionHandler'ını bulur
-```
-
-#### **3. `GlobalExceptionHandler` Sınıfı - Exception İşleyici**
-```csharp
-public class GlobalExceptionHandler : IExceptionHandler
-{
-    public async ValueTask<bool> TryHandleAsync(
-        HttpContext httpContext,
-        Exception exception, // ← GELEN EXCEPTION
-        CancellationToken cancellationToken)
-    {
-        // Exception tipine bak
-        var problemDetails = CreateProblemDetails(exception, httpContext);
-        
-        // HTTP Response oluştur
-        httpContext.Response.StatusCode = problemDetails.Status ?? 500;
-        await httpContext.Response.WriteAsJsonAsync(problemDetails);
-        
-        return true; // "Exception'ı ben handle ettim"
-    }
-}
-```
-**Analoji:** Acil Servis Doktoru - Gelen hastayı muayene eder, teşhis koyar ve tedavi planı oluşturur
-**Teknik:** Yakalanan exception'ı analiz eder, tipine göre uygun HTTP status code ve ProblemDetails oluşturur, kullanıcıya JSON formatında döner.
-
-**Tam Akış:**
-```
-1. Controller'da exception fırlatılır
+1. Handler'da exception fırlatılır
    ↓
-2. ExceptionHandlerMiddleware'in catch bloğu yakalar
+2. MediatR pipeline'dan çıkar
    ↓
-3. DI'dan IExceptionHandler alınır (GlobalExceptionHandler)
+3. Controller'a gelir
    ↓
-4. GlobalExceptionHandler.TryHandleAsync() çağrılır
+4. Controller'da try-catch YOK (en iyi pratik)
    ↓
-5. Exception tipine göre ProblemDetails oluşturulur
+5. Exception Controller'dan çıkar
    ↓
-6. HTTP Response olarak döner
+6. Middleware Pipeline'a gelir
+   ↓
+7. ExceptionHandlerMiddleware yakalar
+   ↓
+8. DI'dan IExceptionHandler alınır (GlobalExceptionHandler)
+   ↓
+9. GlobalExceptionHandler.TryHandleAsync() çağrılır
+   ↓
+10. HTTP Response olarak döner
 ```
 
 ---
 
-### **4. `builder.Services.AddProblemDetails()` - ProblemDetails Desteği (Opsiyonel)**
+## 7. Exception Nasıl Fırlatılır ve Yakalanır?
+
+### 7.1 Exception Nasıl Fırlatılır?
+
 ```csharp
-// Program.cs'de:
-builder.Services.AddProblemDetails();
-```
-**Analoji:** Standart Form Doldurma - Tüm doktorlar aynı formu kullanır
-**Teknik:** ProblemDetails formatını destekler. RFC 7807 standardına uygun hata response'ları oluşturur.
-
-**Ne İşe Yarar?**
-- Standart hata formatı sağlar
-- Swagger/OpenAPI entegrasyonu için faydalıdır
-- Opsiyoneldir ama önerilir
-
----
-
-## ❓ **CONTROLLER'DA TRY-CATCH OLURSA NE OLUR?**
-
-### **Analoji:** Postacı Örneği
-- **Normalde:** Postacı hasta mektubu (exception) görünce hastaneye (GlobalExceptionHandler) gönderir
-- **Try-Catch ile:** Postacı hastayı kendi evinde (Controller) tedavi etmeye çalışır
-
-### **3 Senaryo:**
-
-#### **1. Controller Exception'ı Yakalar ve Yeniden FIRLATMAZSA ❌**
-```csharp
-[HttpPost]
-public async Task<IActionResult> StoreBasket([FromBody] ShoppingCartDto basket)
-{
-    try
-    {
-        var result = await _mediator.Send(new StoreBasketCommand(basket));
-        return Ok(result);
-    }
-    catch (Exception ex)
-    {
-        // ❌ Sadece logluyor, yeniden fırlatmıyor!
-        _logger.LogError(ex, "Hata oluştu");
-        return StatusCode(500, "Internal Server Error");
-    }
-}
-```
-**SONUÇ:** GlobalExceptionHandler ÇALIŞMAZ! Exception Controller'da yakalanıp bitirildi.
-
-#### **2. Controller Exception'ı Yakalar ve Yeniden FIRLATIRSA ✅**
-```csharp
-[HttpPost]
-public async Task<IActionResult> StoreBasket([FromBody] ShoppingCartDto basket)
-{
-    try
-    {
-        var result = await _mediator.Send(new StoreBasketCommand(basket));
-        return Ok(result);
-    }
-    catch (Exception ex)
-    {
-        // ✅ Logladı ve YENİDEN FIRLATTI
-        _logger.LogError(ex, "Hata oluştu");
-        throw; // ⭐ KRİTİK: GlobalExceptionHandler çalışır
-    }
-}
-```
-**SONUÇ:** GlobalExceptionHandler ÇALIŞIR! Exception yeniden fırlatıldı.
-
-#### **3. Controller Exception'ı Yakalamazsa (SENİN YAPTIĞIN) ✅**
-```csharp
-[HttpPost]
-public async Task<ActionResult<ShoppingCartDto>> StoreBasket([FromBody] ShoppingCartDto basket)
-{
-    // ✅ Exception yakalamıyor, direkt dışarı fırlatıyor
-    var result = await _mediator.Send(new StoreBasketCommand(basket));
-    return Ok(result);
-}
-```
-**SONUÇ:** GlobalExceptionHandler ÇALIŞIR! Exception hiç yakalanmadı.
-
-### **ÖZET:**
-- ❌ **Controller yakalayıp fırlatmazsa** → GlobalExceptionHandler çalışmaz
-- ✅ **Controller yakalayıp yeniden fırlatırsa** → GlobalExceptionHandler çalışır
-- ✅ **Controller hiç yakalamazsa** → GlobalExceptionHandler çalışır
-
-**SENİN PROJENDE:** Controller'lar exception yakalamıyor (✅ EN İYİ PRATİK)
-
----
-
-## ⚡ **EXCEPTION NASIL FIRLATILIR VE YAKALANIR?**
-
-### **1. Exception Nasıl Fırlatılır?**
-```csharp
-// Basit exception fırlatma:
+// 1. Basit exception fırlatma:
 throw new Exception("Hata mesajı");
 
-// Custom exception fırlatma:
+// 2. Custom exception fırlatma:
 throw new NotFoundException("Ürün bulunamadı");
 
-// İç exception ile fırlatma:
+// 3. İç exception ile fırlatma:
 throw new InvalidOperationException("İşlem geçersiz", innerException);
 ```
 
-### **2. GlobalExceptionHandler'ın Yakalaması İçin Gerekenler:**
+### 7.2 GlobalExceptionHandler'ın Yakalaması İçin Gerekenler
 
-#### **KRİTİK KURAL:** Exception **YAKALANMAMALI** veya **YENİDEN FIRLATILMALI**
+#### KRİTİK KURAL: Exception **YAKALANMAMALI** veya **YENİDEN FIRLATILMALI**
 
 ```csharp
 // ✅ Senaryo 1: Hiç yakalanmaz (GlobalExceptionHandler çalışır)
@@ -317,64 +710,38 @@ catch
 }
 ```
 
----
+### 7.3 Async Metotlar Otomatik Exception Fırlatabilir!
 
-## 🔥 **ASYNC METOTLAR OTOMATİK OLARAK EXCEPTION FIRLATABİLİR!**
+**Önemli:** Async metotlar (özellikle EF Core metotları), senin kodunda `throw` keyword'ü görünmese bile, arka planda exception fırlatabilir.
 
-### **Detaylı Açıklama:**
-
+**Örnek:**
 ```csharp
 // Bu satırda "throw" gözükmüyor ama...
 var basket = await _context.ShoppingCarts
     .FirstOrDefaultAsync(x => x.UserName == userName);
-// ⚡ ARKA PLANDA EXCEPTION FIRLATILABİLİR!
+// ⚡ ARKA PLANDA EXCEPTION FIRLATABİLİR!
 ```
 
-### **Neden Exception Fırlatıyor?**
+**Neden Exception Fırlatıyor?**
 
-#### **1. Database Bağlantı Hatası:**
-```csharp
-// Örnek senaryo:
-// - Database down
-// - Connection string yanlış
-// - Network problemi
+1. **Database Bağlantı Hatası:**
+   - Database down
+   - Connection string yanlış
+   - Network problemi
+   - → `DbUpdateException` fırlatır
 
-await _context.ShoppingCarts.FirstOrDefaultAsync(...);
-// 👉 DbUpdateException fırlatır!
-```
+2. **SQL Sorgu Hatası:**
+   - Tablo yok
+   - Kolon yok
+   - Yanlış SQL syntax
+   - → `SqlException` fırlatır
 
-**Gerçek Hayat Senaryosu:**
-```
-1. await FirstOrDefaultAsync() çağrılır
-2. EF Core database'e bağlanmaya çalışır
-3. Connection başarısız olur (database server çöktü)
-4. EF Core INTERNALLY exception fırlatır
-5. Senin koduna exception olarak gelir
-```
+3. **Timeout:**
+   - Query çok uzun sürüyor
+   - Database yavaş
+   - → `TimeoutException` fırlatır
 
-#### **2. SQL Sorgu Hatası:**
-```csharp
-// Örnek senaryo:
-// - Tablo yok
-// - Kolon yok
-// - Yanlış SQL syntax
-
-await _context.ShoppingCarts.FirstOrDefaultAsync(...);
-// 👉 SqlException fırlatır!
-```
-
-#### **3. Timeout:**
-```csharp
-// Örnek senaryo:
-// - Query çok uzun sürüyor
-// - Database yavaş
-
-await _context.ShoppingCarts.FirstOrDefaultAsync(...);
-// 👉 TimeoutException fırlatır!
-```
-
-### **İşin Arkasındaki Teknik Detay:**
-
+**İşin Arkasındaki Teknik Detay:**
 ```csharp
 // FirstOrDefaultAsync() metodunun basitleştirilmiş implementasyonu:
 public async Task<TEntity> FirstOrDefaultAsync(...)
@@ -396,60 +763,7 @@ public async Task<TEntity> FirstOrDefaultAsync(...)
 
 **Önemli Nokta:** EF Core, kendi içinde exception'ları yakalayıp, daha anlamlı exception tiplerine çevirerek yeniden fırlatır. Bu yüzden senin kodunda `throw` keyword'ü görünmese bile, async metot çağrısı exception fırlatabilir.
 
-### **Kod Örneği ile Gösterim:**
-
-```csharp
-// SENİN KODUN:
-public async Task<bool> DeleteBasket(string userName)
-{
-    // ⭐ BU SATIR EXCEPTION FIRLATABİLİR:
-    var basket = await _context.ShoppingCarts
-        .FirstOrDefaultAsync(x => x.UserName == userName);
-    
-    // Database down olduğunda bu satıra ASLA gelinmez!
-    // Çünkü yukarıda exception fırlatılır ve method'dan çıkılır
-    
-    // Eğer buraya geldiyse, demek ki exception YOK
-    if (basket != null)
-    {
-        _context.ShoppingCarts.Remove(basket);
-        await _context.SaveChangesAsync();
-        // ⚠️ Bu satır da exception fırlatabilir: DbUpdateException
-    }
-    
-    return basket != null;
-}
-```
-
-### **Hangi Exception'lar Fırlatılabilir?**
-
-```csharp
-// Entity Framework Core'dan gelebilecek exception'lar:
-await _context.ShoppingCarts.FirstOrDefaultAsync(...);
-// 👇 Potansiyel exception'lar:
-
-// 1. DbUpdateException
-//    - Database connection hatası
-//    - Constraint violation
-//    - Deadlock
-
-// 2. SqlException (SQL Server için)
-//    - Invalid SQL
-//    - Permission denied
-//    - Table not found
-
-// 3. InvalidOperationException
-//    - Context disposed
-//    - Multiple async operations
-
-// 4. TimeoutException
-//    - Query timeout
-
-// 5. ObjectDisposedException
-//    - DbContext disposed
-```
-
-### **GlobalExceptionHandler'a Nasıl Ulaşır?**
+### 7.4 GlobalExceptionHandler'a Nasıl Ulaşır?
 
 ```
 1. FirstOrDefaultAsync() INTERNALLY exception fırlatır
@@ -464,26 +778,78 @@ await _context.ShoppingCarts.FirstOrDefaultAsync(...);
 10. GlobalExceptionHandler işler
 ```
 
-### **Kritik Fark: "throw" vs "async exception"**
-
-```csharp
-// SEN exception fırlatıyorsun:
-throw new NotFoundException("Basket not found");
-// 👉 Bu SENİN yazdığın kod
-
-// EF Core exception fırlatıyor:
-await _context.ShoppingCarts.FirstOrDefaultAsync(...);
-// 👉 Bu EF Core'un INTERNALLY fırlattığı exception
-//    Sen görmüyorsun ama oluyor!
-```
-
-**Özet:** Async metotlar (özellikle EF Core metotları), senin kodunda `throw` keyword'ü görünmese bile, arka planda exception fırlatabilir. Bu exception'lar, eğer yakalanmazsa, GlobalExceptionHandler'a kadar ulaşır.
-
 ---
 
-## 🔍 **REPOSITORY'DE EXCEPTION FIRLATMA ANALİZİ**
+## 8. Pratik Senaryolar ve Örnekler
 
-### **Verilen Kod: BasketRepository.DeleteBasket()**
+### 8.1 Controller'da Try-Catch Durumu
+
+#### Senaryo 1: Controller Exception'ı Yakalar ve Yeniden FIRLATMAZSA ❌
+
+```csharp
+[HttpPost]
+public async Task<IActionResult> StoreBasket([FromBody] ShoppingCartDto basket)
+{
+    try
+    {
+        var result = await _mediator.Send(new StoreBasketCommand(basket));
+        return Ok(result);
+    }
+    catch (Exception ex)
+    {
+        // ❌ Sadece logluyor, yeniden fırlatmıyor!
+        _logger.LogError(ex, "Hata oluştu");
+        return StatusCode(500, "Internal Server Error");
+    }
+}
+```
+
+**SONUÇ:** GlobalExceptionHandler ÇALIŞMAZ! Exception Controller'da yakalanıp bitirildi.
+
+#### Senaryo 2: Controller Exception'ı Yakalar ve Yeniden FIRLATIRSA ✅
+
+```csharp
+[HttpPost]
+public async Task<IActionResult> StoreBasket([FromBody] ShoppingCartDto basket)
+{
+    try
+    {
+        var result = await _mediator.Send(new StoreBasketCommand(basket));
+        return Ok(result);
+    }
+    catch (Exception ex)
+    {
+        // ✅ Logladı ve YENİDEN FIRLATTI
+        _logger.LogError(ex, "Hata oluştu");
+        throw; // ⭐ KRİTİK: GlobalExceptionHandler çalışır
+    }
+}
+```
+
+**SONUÇ:** GlobalExceptionHandler ÇALIŞIR! Exception yeniden fırlatıldı.
+
+#### Senaryo 3: Controller Exception'ı Yakalamazsa (EN İYİ PRATİK) ✅
+
+```csharp
+[HttpPost]
+public async Task<ActionResult<ShoppingCartDto>> StoreBasket([FromBody] ShoppingCartDto basket)
+{
+    // ✅ Exception yakalamıyor, direkt dışarı fırlatıyor
+    var result = await _mediator.Send(new StoreBasketCommand(basket));
+    return Ok(result);
+}
+```
+
+**SONUÇ:** GlobalExceptionHandler ÇALIŞIR! Exception hiç yakalanmadı.
+
+**ÖZET:**
+- ❌ **Controller yakalayıp fırlatmazsa** → GlobalExceptionHandler çalışmaz
+- ✅ **Controller yakalayıp yeniden fırlatırsa** → GlobalExceptionHandler çalışır
+- ✅ **Controller hiç yakalamazsa** → GlobalExceptionHandler çalışır (EN İYİ PRATİK)
+
+### 8.2 Repository'de Exception Fırlatma Analizi
+
+**Örnek Kod:**
 ```csharp
 public async Task<bool> DeleteBasket(string userName)
 {
@@ -491,22 +857,14 @@ public async Task<bool> DeleteBasket(string userName)
     var basket = await _context.ShoppingCarts
         .FirstOrDefaultAsync(x => x.UserName == userName);
     // ⚠️ Bu satır exception fırlatabilir: DbUpdateException, SqlException, vb.
-    // ⚡ ARKA PLANDA EXCEPTION FIRLATABİLİR!
-    // Neden? EF Core, database bağlantısı başarısız olursa, SQL hatası olursa,
-    // timeout olursa INTERNALLY exception fırlatır ve senin koduna iletir.
-    // Senin kodunda "throw" gözükmese bile, async metot çağrısı exception üretebilir.
-
+    
     if (basket != null)
     {
         _context.ShoppingCarts.Remove(basket);
         await _context.SaveChangesAsync(); 
         // ⚠️ Bu satır exception fırlatabilir: DbUpdateException
-        // ⚡ ARKA PLANDA EXCEPTION FIRLATABİLİR!
-        // Neden? SaveChangesAsync() database'e yazma işlemi yapar.
-        // Constraint violation, foreign key hatası, deadlock gibi durumlarda
-        // EF Core INTERNALLY exception fırlatır.
     }
-
+    
     // 2. Redis'ten sil
     try
     {
@@ -522,56 +880,31 @@ public async Task<bool> DeleteBasket(string userName)
         _logger.LogWarning(ex, "Redis unavailable...");
         // ❌ throw YOK! GlobalExceptionHandler çalışmaz
     }
-
+    
     return basket != null;
 }
 ```
 
-### **Bu Kodda Exception Fırlatan Yerler:**
+**Exception Fırlatan Yerler:**
 
-#### **1. `FirstOrDefaultAsync()` - EXCEPTION FIRLATABİLİR ✅**
-```csharp
-var basket = await _context.ShoppingCarts
-    .FirstOrDefaultAsync(x => x.UserName == userName);
-```
-**Hangi Exception'lar fırlatılabilir?**
-- `DbUpdateException` - Database connection hatası
-- `SqlException` - SQL sorgu hatası
-- `TimeoutException` - Timeout hatası
+1. **`FirstOrDefaultAsync()` - EXCEPTION FIRLATABİLİR ✅**
+   - `DbUpdateException` - Database connection hatası
+   - `SqlException` - SQL sorgu hatası
+   - `TimeoutException` - Timeout hatası
+   - **GlobalExceptionHandler çalışır mı?** → **EVET** (Çünkü yakalanmıyor)
 
-**Nasıl Exception Fırlatıyor?**
-- EF Core, database'e bağlanmaya çalışırken hata olursa, SQL sorgusu çalıştırırken hata olursa veya timeout olursa, kendi içinde exception yakalayıp daha anlamlı exception tiplerine çevirerek yeniden fırlatır. Senin kodunda `throw` keyword'ü görünmese bile, bu async metot çağrısı exception üretebilir.
+2. **`SaveChangesAsync()` - EXCEPTION FIRLATABİLİR ✅**
+   - `DbUpdateException` - Constraint violation, foreign key hatası
+   - `DbUpdateConcurrencyException` - Concurrency conflict
+   - **GlobalExceptionHandler çalışır mı?** → **EVET** (Çünkü yakalanmıyor)
 
-**GlobalExceptionHandler çalışır mı?** → **EVET** (Çünkü yakalanmıyor)
+3. **`KeyDeleteAsync()` - EXCEPTION FIRLATABİLİR ama YAKALANIYOR ❌**
+   - `RedisConnectionException` fırlatabilir
+   - Ama catch bloğunda yakalanıyor ve throw yok
+   - **GlobalExceptionHandler çalışır mı?** → **HAYIR** (Çünkü catch var ve throw yok)
 
-#### **2. `SaveChangesAsync()` - EXCEPTION FIRLATABİLİR ✅**
-```csharp
-await _context.SaveChangesAsync();
-```
-**Hangi Exception'lar fırlatılabilir?**
-- `DbUpdateException` - Constraint violation, foreign key hatası
-- `DbUpdateConcurrencyException` - Concurrency conflict
+**Eksik Olan: NotFoundException Fırlatma**
 
-**Nasıl Exception Fırlatıyor?**
-- EF Core, database'e yazma işlemi yaparken constraint violation, foreign key hatası, deadlock gibi durumlarla karşılaşırsa, kendi içinde exception yakalayıp `DbUpdateException` olarak yeniden fırlatır.
-
-**GlobalExceptionHandler çalışır mı?** → **EVET** (Çünkü yakalanmıyor)
-
-#### **3. `KeyDeleteAsync()` - EXCEPTION FIRLATABİLİR ama YAKALANIYOR ❌**
-```csharp
-try
-{
-    await _redis.KeyDeleteAsync(GetRedisKey(userName));
-}
-catch (RedisConnectionException ex)
-{
-    _logger.LogWarning(...);
-    // ❌ throw YOK! GlobalExceptionHandler çalışmaz
-}
-```
-**GlobalExceptionHandler çalışır mı?** → **HAYIR** (Çünkü catch var ve throw yok)
-
-### **Eksik Olan: NotFoundException Fırlatma**
 Şu anki kod:
 ```csharp
 if (basket != null)
@@ -587,43 +920,41 @@ public async Task DeleteBasket(string userName)
 {
     var basket = await _context.ShoppingCarts
         .FirstOrDefaultAsync(x => x.UserName == userName);
-
+    
     // ⭐ EXCEPTION FIRLAT!
     if (basket == null)
         throw new NotFoundException($"Basket for {userName} not found");
-
+    
     _context.ShoppingCarts.Remove(basket);
     await _context.SaveChangesAsync();
-
+    
     // Redis silme...
 }
 ```
 
----
+### 8.3 Exception Yakalama Şartları
 
-## ⚠️ **EXCEPTION YAKALAMA ŞARTLARI**
+**GlobalExceptionHandler'ın Çalışması İçin 3 Şart:**
 
-### **GlobalExceptionHandler'ın Çalışması İçin 5 Şart:**
+#### 1. Program.cs'de 3 Satır ZORUNLU OLMALI ⭐⭐⭐
 
-#### **1. Program.cs'de 3 Satır ZORUNLU OLMALI** ⭐⭐⭐
 ```csharp
 // Program.cs'de MUTLAKA olmalı:
 
 // 1. Handler'ı DI'ya kaydet:
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
-// ← BU OLMADAN GlobalExceptionHandler çalışmaz!
 
 // 2. ProblemDetails desteği (opsiyonel ama önerilir):
 builder.Services.AddProblemDetails();
 
 // 3. Middleware'ı aktif et:
 app.UseExceptionHandler();
-// ← BU OLMADAN exception yakalanmaz!
 ```
 
 **Bu 3 satırdan biri eksikse, GlobalExceptionHandler ÇALIŞMAZ!**
 
-#### **2. THROW OLMALI** ⭐
+#### 2. THROW OLMALI ⭐
+
 ```csharp
 // ✅ Çalışır: throw var
 throw new NotFoundException("Ürün yok");
@@ -636,7 +967,8 @@ _logger.LogError("Hata");
 return false;
 ```
 
-#### **3. YAKALANMAMALI veya YENİDEN FIRLATILMALI**
+#### 3. YAKALANMAMALI veya YENİDEN FIRLATILMALI
+
 ```csharp
 // ✅ Senaryo 1: Hiç yakalanmaz
 throw new Exception(); // GlobalExceptionHandler ÇALIŞIR
@@ -648,114 +980,12 @@ try { throw; } catch { throw; } // GlobalExceptionHandler ÇALIŞIR
 try { throw; } catch { log; } // GlobalExceptionHandler ÇALIŞMAZ
 ```
 
-#### **4. `app.UseExceptionHandler()` AKTİF OLMALI**
-```csharp
-// Program.cs'de:
-var app = builder.Build();
-app.UseExceptionHandler(); // ← BU SATIR OLMALI!
-app.MapControllers();
-```
-
-**Not:** Bu şart, aslında 1. şartın bir parçası ama önemli olduğu için ayrı belirtildi.
-
-#### **5. `AddExceptionHandler()` KAYDI OLMALI**
-```csharp
-// Program.cs'de:
-builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
-// ← BU KAYIT OLMALI!
-```
-
-**Not:** Bu şart, aslında 1. şartın bir parçası ama önemli olduğu için ayrı belirtildi.
-
 ---
 
-## 🔍 **SENİN PROJENDE ÖZEL DURUMLAR**
+## 9. En İyi Pratikler ve Öneriler
 
-### **1. SaveBasket - PostgreSQL Hatası (ÇALIŞIR) ✅**
-```csharp
-try
-{
-    await _context.SaveChangesAsync(); // DbUpdateException
-}
-catch
-{
-    await transaction.RollbackAsync();
-    throw; // ← KRİTİK! GlobalExceptionHandler ÇALIŞIR
-}
-```
+### 9.1 GlobalExceptionHandler Güncellemesi
 
-### **2. SaveBasket - Redis Hatası (ÇALIŞMAZ) ❌**
-```csharp
-try
-{
-    await _redis.StringSetAsync(...); // RedisConnectionException
-}
-catch (RedisConnectionException ex)
-{
-    _logger.LogWarning(...);
-    // ❌ throw YOK! GlobalExceptionHandler ÇALIŞMAZ
-}
-```
-
-### **3. ValidationBehavior (ÇALIŞIR ama 500 DÖNER) ⚠️**
-```csharp
-throw new ValidationException(failures); 
-// GlobalExceptionHandler çalışır ama ValidationException case'i yok → 500 döner
-```
-
-### **4. DeleteBasket - Basket Yoksa (ÇALIŞMAZ) ❌**
-```csharp
-var basket = await _context.ShoppingCarts
-    .FirstOrDefaultAsync(x => x.UserName == userName);
-
-if (basket != null)
-{
-    // Silme işlemi
-}
-return basket != null; // Exception FIRLATMIYOR, sadece false dönüyor
-```
-
----
-
-## 🧪 **DEBUG VE TEST YÖNTEMLERİ**
-
-### **1. GlobalExceptionHandler'ı Debug Etmek:**
-```csharp
-// GlobalExceptionHandler.cs'ye ekle:
-public async ValueTask<bool> TryHandleAsync(...)
-{
-    // Debug için:
-    Console.WriteLine($"[DEBUG] Exception Type: {exception.GetType().Name}");
-    Console.WriteLine($"[DEBUG] Exception Message: {exception.Message}");
-    Console.WriteLine($"[DEBUG] Stack Trace: {exception.StackTrace}");
-    
-    // Kalan kod...
-}
-```
-
-### **2. Postman Test Senaryoları:**
-```http
-### Senaryo 1: Controller'da Try-Catch (Yeniden Fırlatma)
-POST http://localhost:5000/api/test/exception
-
-### Senaryo 2: ValidationException Testi
-POST http://localhost:5000/api/baskets
-Content-Type: application/json
-
-{
-    "userName": "",  # Boş bırak
-    "items": []
-}
-
-### Senaryo 3: DeleteBasket - NotFound Testi
-DELETE http://localhost:5000/api/baskets/nonexistent-user
-```
-
----
-
-## ✅ **EN İYİ PRATİKLER**
-
-### **1. GlobalExceptionHandler Güncellemesi:**
 ```csharp
 // GlobalExceptionHandler.cs'de:
 using FluentValidation;
@@ -791,7 +1021,8 @@ return exception switch
 };
 ```
 
-### **2. Repository Pattern Düzeltmeleri:**
+### 9.2 Repository Pattern Düzeltmeleri
+
 ```csharp
 // Redis işlemlerinde:
 catch (RedisConnectionException ex)
@@ -817,7 +1048,8 @@ public async Task DeleteBasket(string userName)
 }
 ```
 
-### **3. Handler'larda Exception Standardizasyonu:**
+### 9.3 Handler'larda Exception Standardizasyonu
+
 ```csharp
 public async Task<Response> Handle()
 {
@@ -837,13 +1069,12 @@ public async Task<Response> Handle()
 }
 ```
 
----
+### 9.4 Özet Tablolar
 
-## 🎯 **ÖZET TABLOLAR**
+**GlobalExceptionHandler Çalışma Matrisi:**
 
-### **GlobalExceptionHandler Çalışma Matrisi:**
-| **Durum** | **throw** | **catch** | **GlobalExceptionHandler** |
-|-----------|-----------|-----------|---------------------------|
+| Durum | throw | catch | GlobalExceptionHandler |
+|-------|-------|-------|----------------------|
 | Direkt throw | ✅ VAR | ❌ YOK | ✅ ÇALIŞIR |
 | Controller'da try-catch → throw; | ✅ VAR | ✅ VAR | ✅ ÇALIŞIR |
 | Controller'da try-catch → return | ❌ YOK | ✅ VAR | ❌ ÇALIŞMAZ |
@@ -851,100 +1082,27 @@ public async Task<Response> Handle()
 | Repository'de catch → log | ❌ YOK | ✅ VAR | ❌ ÇALIŞMAZ |
 | Async metot exception (EF Core) | ✅ VAR (görünmez) | ❌ YOK | ✅ ÇALIŞIR |
 
-### **Senin Projende Exception Akışları:**
-| **Kaynak** | **Exception Tipi** | **throw?** | **GlobalExceptionHandler** |
-|------------|-------------------|------------|---------------------------|
-| FirstOrDefaultAsync() | DbUpdateException | ✅ (EF Core INTERNALLY) | ✅ ÇALIŞIR |
-| SaveChangesAsync() | DbUpdateException | ✅ (EF Core INTERNALLY) | ✅ ÇALIŞIR |
-| KeyDeleteAsync() | RedisConnectionException | ❌ (catch var) | ❌ ÇALIŞMAZ |
-| Handler direkt | NotFoundException | ✅ (Sen yazdın) | ✅ ÇALIŞIR |
-| ValidationBehavior | ValidationException | ✅ (Sen yazdın) | ✅ ÇALIŞIR (500 döner) |
-| DeleteBasket (basket null) | (Exception yok) | ❌ | ❌ ÇALIŞMAZ |
-
 ---
 
-## 🔧 **ACİL YAPILMASI GEREKENLER**
+## 🏆 Sonuç
 
-### **0. Program.cs'de 3 Satır Kontrolü (EN ÖNEMLİSİ!):**
-```csharp
-// Program.cs'de MUTLAKA olmalı:
+### Özet:
 
-// 1. Handler'ı DI'ya kaydet:
-builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
-
-// 2. ProblemDetails desteği (opsiyonel ama önerilir):
-builder.Services.AddProblemDetails();
-
-// 3. Middleware'ı aktif et:
-app.UseExceptionHandler();
-```
-
-**Bu 3 satırdan biri eksikse, GlobalExceptionHandler ÇALIŞMAZ!**
-
-### **1. GlobalExceptionHandler Güncelle:**
-```csharp
-// 1. using FluentValidation; ekle
-// 2. ValidationException case'i ekle (400)
-// 3. Default case'de exception.Message göster
-```
-
-### **2. Repository Catch Bloklarını Düzelt:**
-```csharp
-// Tüm Redis catch bloklarına:
-catch (RedisConnectionException ex)
-{
-    _logger.LogWarning(ex, "Redis hatası");
-    throw; // ← BU SATIRI EKLE
-}
-```
-
-### **3. DeleteBasket'i Düzelt:**
-```csharp
-public async Task DeleteBasket(string userName)
-{
-    var basket = await _context.ShoppingCarts
-        .FirstOrDefaultAsync(x => x.UserName == userName);
-    
-    if (basket == null)
-        throw new NotFoundException($"Basket for {userName} not found");
-    
-    // Kalan kod...
-}
-```
-
----
-
-## 🏆 **SONUÇ**
-
-### **SENİN DEDİĞİN GİBİ ÖZETLE:**
 - ✅ **Program.cs'de 3 satır ZORUNLU:**
   - `builder.Services.AddExceptionHandler<GlobalExceptionHandler>();` → Handler'ı DI'ya kaydet
   - `builder.Services.AddProblemDetails();` → ProblemDetails desteği (opsiyonel ama önerilir)
   - `app.UseExceptionHandler();` → Exception YAKALAMA motoru (ExceptionHandlerMiddleware)
+
 - ✅ **`ExceptionHandlerMiddleware`** → Arka planda exception'ları yakalar, DI'dan `IExceptionHandler` alır, `TryHandleAsync()` çağırır
+
 - ✅ **`GlobalExceptionHandler`** → Exception AYIRT ETME ve response oluşturma
+
 - ✅ **Controller exception yakalamaz** → En iyi pratik
+
 - ✅ **Async metotlar (EF Core) otomatik exception fırlatabilir** → `throw` görünmese bile olur
 
-### **CEVAPLAR:**
+- ✅ **HttpContext** → Her request için oluşturulur, middleware pipeline'dan geçer, handler'a aktarılır
 
-#### **1. "Eğer Controller'da try-catch varsa UseExceptionHandler yine yakalar mı?"**
-- **Controller catch'te `throw;` varsa** → ✅ EVET, GlobalExceptionHandler çalışır
-- **Controller catch'te `throw;` yoksa** → ❌ HAYIR, GlobalExceptionHandler çalışmaz
-
-#### **2. "Repository'de exception fırlatması için ne olması gerekir?"**
-- **Program.cs'de 3 satır ZORUNLU:**
-  - `builder.Services.AddExceptionHandler<GlobalExceptionHandler>();` → Handler'ı DI'ya kaydet
-  - `builder.Services.AddProblemDetails();` → ProblemDetails desteği (opsiyonel ama önerilir)
-  - `app.UseExceptionHandler();` → ExceptionHandlerMiddleware'i aktif et
-- `throw` keyword'ü kullanılmalı VEYA
-- Async metot çağrısı yapılmalı (EF Core gibi - INTERNALLY exception fırlatır)
-- Exception yakalanmamalı veya yeniden fırlatılmalı (`throw;`)
-
-#### **3. "DeleteBasket'te hata olursa exception fırlatan yer nerede?"**
-- `FirstOrDefaultAsync()` ve `SaveChangesAsync()` exception fırlatabilir (EF Core INTERNALLY)
-- Ama **basket null olduğunda exception fırlatmıyor**, sadece `false` dönüyor
-- **Eksik olan:** `if (basket == null) throw new NotFoundException(...);`
+- ✅ **Interface Pattern** → Dependency Inversion Principle (DIP) prensibine uyum
 
 **Bu düzenlemeleri yaparsan, exception handling sistemin TAMAMEN SAĞLAM olacak!** 🚀
-
