@@ -1,0 +1,20 @@
+Projedeki katmanlar: => Bunu inceledim ama sen yine de gözden geçir.
+    -BuildingBlocks:
+    -BuildingBlocks.Behaviors
+    -BuildingBlocks.Exceptions
+    -BuildingBlocks.Messaging 
+
+Services:
+    -Basket.API - 
+    -Catalog.API
+    -Discount.Grpc
+    -Ordering.API
+    -ApiGateway:
+    -Gateway.API
+    -Clients:
+
+Web.UI
+
+
+=> İncelerken bir katmanı diğer katmanla olan ilişkisini dikkate al ve nasıl iletişimde
+olduğunu da incele.
