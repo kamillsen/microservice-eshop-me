@@ -22,7 +22,7 @@ olduğunu da incele.
 = İNCELEDİKLERİM =
 => BuildingBlocks
 
-=> Catalog.API
+=> Catalog.API == BİTTİ
     -Catalog.API İnceleme Akışı
     -Program.cs — Uygulama yapılandırması, DI, middleware, pipeline
     -Entities/ — Domain modelleri (Product, Category)
@@ -35,3 +35,112 @@ olduğunu da incele.
     -Controllers/ — API endpoint'leri
 Bu akış: yapılandırma → veri modelleri → veritabanı → DTO'lar → mapping → iş mantığı → API katmanı.
 İstersen bu sırayla ilerleyebiliriz.
+
+
+================================================================================
+📋 ÖNERİLEN İNCELEME SIRASI (Bağımlılık ve Karmaşıklık Sırasına Göre)
+================================================================================
+
+✅ 1. BuildingBlocks (TAMAMLANDI)
+   - BuildingBlocks.Behaviors (MediatR Pipeline Behaviors)
+   - BuildingBlocks.Exceptions (Global Exception Handling)
+   - BuildingBlocks.Messaging (RabbitMQ Events)
+
+✅ 2. Catalog.API (TAMAMLANDI)
+   - En basit REST API servisi
+   - CQRS + MediatR pattern'i öğrenmek için ideal
+   - Bağımlılık yok (sadece PostgreSQL)
+
+⏭️ 3. Discount.Grpc (SONRAKİ)
+   NEDEN BU SIRADA?
+   - En basit servis (MediatR yok, sadece gRPC)
+   - Bağımsız (hiçbir servise bağımlı değil)
+   - gRPC protokolünü öğrenmek için ideal
+   - Basket.API'den önce incelemek mantıklı (Basket Discount'ı kullanıyor)
+   
+   İNCELEME AKIŞI:
+   - Program.cs → gRPC server yapılandırması
+   - Protos/ → Proto dosyası (service tanımları)
+   - Services/ → gRPC service implementation
+   - Entities/ → Coupon entity
+   - Data/ → DbContext
+   - Dockerfile → gRPC için özel port yapılandırması (8080: gRPC, 8081: Health)
+
+⏭️ 4. Basket.API
+   NEDEN BU SIRADA?
+   - Discount.Grpc'yi kullanıyor (gRPC client öğrenmek için)
+   - Redis cache pattern'i (Cache-aside pattern)
+   - RabbitMQ publisher (event gönderme)
+   - Catalog.API'den daha karmaşık ama Ordering'den daha basit
+   
+   İNCELEME AKIŞI:
+   - Program.cs → Redis, gRPC client, RabbitMQ yapılandırması
+   - Entities/ → ShoppingCart, ShoppingCartItem
+   - Data/ → BasketRepository (Redis + PostgreSQL)
+   - GrpcServices/ → DiscountGrpcService (gRPC client wrapper)
+   - Features/Basket/ → CQRS (Commands: Store, Delete, Checkout | Queries: Get)
+   - CheckoutBasketHandler → RabbitMQ event publishing
+   - Controllers/ → BasketsController
+
+⏭️ 5. Ordering.API
+   NEDEN BU SIRADA?
+   - Basket.API'den event alıyor (RabbitMQ consumer öğrenmek için)
+   - Event-driven architecture pattern'i
+   - Basket'i anladıktan sonra Ordering'i anlamak daha kolay
+   
+   İNCELEME AKIŞI:
+   - Program.cs → RabbitMQ consumer yapılandırması (MassTransit)
+   - EventHandlers/ → BasketCheckoutConsumer (RabbitMQ event consumer)
+   - Entities/ → Order, OrderItem
+   - Data/ → OrderingDbContext
+   - Features/Orders/ → CQRS (Commands: Create | Queries: Get, GetByUser)
+   - Controllers/ → OrdersController
+
+⏭️ 6. Gateway.API
+   NEDEN BU SIRADA?
+   - Tüm servisleri birleştiriyor (routing)
+   - Servisleri anladıktan sonra Gateway'i anlamak mantıklı
+   - YARP (Yet Another Reverse Proxy) öğrenmek için
+   
+   İNCELEME AKIŞI:
+   - Program.cs → YARP yapılandırması
+   - appsettings.json → Route ve Cluster tanımları
+   - Health check aggregation
+
+⏭️ 7. Web.UI (Blazor WebAssembly)
+   NEDEN EN SONDA?
+   - Tüm backend servislerini anladıktan sonra frontend'i anlamak mantıklı
+   - Gateway üzerinden tüm servislere erişiyor
+   - Frontend katmanı (en üst katman)
+   
+   İNCELEME AKIŞI:
+   - Program.cs → HttpClient yapılandırması (Gateway'e bağlanma)
+   - Services/ → API service'leri (Gateway üzerinden)
+   - Pages/ → Blazor sayfaları
+   - Components/ → Reusable components
+   - Models/ → Frontend modelleri
+
+================================================================================
+📊 BAĞIMLILIK GRAFİĞİ
+================================================================================
+
+Web.UI
+  └─► Gateway.API
+        ├─► Catalog.API ──► PostgreSQL
+        ├─► Basket.API ──► Redis + PostgreSQL
+        │     └─► Discount.Grpc (gRPC client) ──► PostgreSQL
+        │     └─► RabbitMQ (publisher)
+        └─► Ordering.API ──► PostgreSQL
+              └─► RabbitMQ (consumer)
+
+================================================================================
+🎯 ÖĞRENME HEDEFLERİ
+================================================================================
+
+1. Discount.Grpc → gRPC protokolü, proto dosyaları, gRPC service implementation
+2. Basket.API → gRPC client, Redis cache-aside pattern, RabbitMQ publisher
+3. Ordering.API → RabbitMQ consumer, Event-driven architecture, MassTransit
+4. Gateway.API → YARP reverse proxy, routing, health check aggregation
+5. Web.UI → Blazor WebAssembly, HttpClient, frontend-backend iletişimi
+
+================================================================================
