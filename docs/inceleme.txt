@@ -18,3 +18,20 @@ Web.UI
 
 => İncelerken bir katmanı diğer katmanla olan ilişkisini dikkate al ve nasıl iletişimde
 olduğunu da incele.
+
+= İNCELEDİKLERİM =
+=> BuildingBlocks
+
+=> Catalog.API
+    -Catalog.API İnceleme Akışı
+    -Program.cs — Uygulama yapılandırması, DI, middleware, pipeline
+    -Entities/ — Domain modelleri (Product, Category)
+    -Data/ — DbContext ve Seed Data
+    -Dtos/ — Veri transfer nesneleri
+    -Mapping/ — AutoMapper profilleri
+    -Features/ — CQRS (Commands ve Queries)
+    -Products (Commands → Queries)
+    -Categories (Commands → Queries)
+    -Controllers/ — API endpoint'leri
+Bu akış: yapılandırma → veri modelleri → veritabanı → DTO'lar → mapping → iş mantığı → API katmanı.
+İstersen bu sırayla ilerleyebiliriz.
