@@ -11,6 +11,8 @@ public class MappingProfile : Profile
 {
     public MappingProfile()
     {
+
+        //CreateMap<TSource, TDestination>() methodu ile mapping kuralları oluşturulur.
         // Command → Entity
         CreateMap<CreateProductCommand, Product>();
         CreateMap<UpdateProductCommand, Product>();
@@ -19,6 +21,7 @@ public class MappingProfile : Profile
         // Entity → DTO
         CreateMap<Product, ProductDto>()
             .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.Category != null ? src.Category.Name : string.Empty));
+        
         CreateMap<Category, CategoryDto>();
     }
 }
