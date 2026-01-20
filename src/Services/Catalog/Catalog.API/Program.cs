@@ -31,10 +31,13 @@ builder.Services.AddMediatR(cfg =>
     cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
 });
 
-// FluentValidation
+// FluentValidation : FluentValidation içinde AbstractValidator<T> türevlerini arar ve DI container'a kaydeder.
 builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
+
+// AutoMapper :Profile'ları otomatik bulmak için AddAutoMapper kullanılır.
 builder.Services.AddAutoMapper(typeof(Program).Assembly);
 
+// DbContext : DbContext'i DI container'a kaydeder. PostgreSQL için AddDbContext kullanılır.
 builder.Services.AddDbContext<CatalogDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Database")));
 
