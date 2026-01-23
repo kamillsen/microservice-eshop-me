@@ -1,451 +1,415 @@
-# 🎬 5 Dakikalık Video İçerik Planı
+# 🎬 5 DAKİKALIK VİDEO SENARYOSU
 ## E-Shop Microservice Mimarisi - Proje Tanıtımı ve Canlı Demo
 
 ---
 
-## ⏱️ Zaman Dağılımı
+## ⏱️ ZAMAN ÖZETİ
 
-| Bölüm | Süre | Toplam |
-|-------|------|--------|
-| **1. Giriş ve Proje Tanıtımı** | 0:30 | 0:30 |
-| **2. Mimari Genel Bakış** | 1:00 | 1:30 |
-| **3. Canlı Demo - Sistem Kullanımı** | 3:00 | 4:30 |
-| **4. Teknik Özet ve Kapanış** | 0:30 | 5:00 |
-
----
-
-## 📝 DETAYLI İÇERİK PLANI
-
-### 🎯 BÖLÜM 1: Giriş ve Proje Tanıtımı (0:00 - 0:30)
-
-**Görsel:**
-- Proje logosu/başlık ekranı
-- Docker Compose terminal ekranı (tüm servisler çalışıyor)
-
-**Söylenecekler:**
-```
-"Merhaba, bugün sizlere eğitim amaçlı geliştirdiğim bir e-ticaret 
-microservice mimarisi projesini tanıtacağım. Bu proje, modern 
-mikroservis mimarisi prensiplerini ve teknolojilerini öğrenmek 
-için tasarlanmış bir e-ticaret uygulamasıdır.
-
-Projede 5 ana servis bulunuyor:
-- Catalog Service (Ürün kataloğu)
-- Basket Service (Sepet yönetimi)
-- Ordering Service (Sipariş yönetimi)
-- Discount Service (İndirim servisi)
-- API Gateway (Merkezi giriş noktası)
-
-Tüm sistem Docker Compose ile tek komutla çalışıyor."
-```
-
-**Gösterilecekler:**
-- Terminal: `docker compose ps` komutu (tüm container'lar çalışıyor)
-- Port listesi (5000, 5001, 5002, 5003, 5004)
+| Süre | Bölüm | İçerik |
+|------|-------|--------|
+| 0:30 | Giriş | Docker, container sayısı |
+| 0:45 | Mimari | Diyagram, gRPC/RabbitMQ |
+| 0:15 | BuildingBlocks | Ortak kodlar |
+| 0:30 | Demo: Ürün | Catalog Service, CQRS |
+| 0:45 | Demo: Sepet | Redis, gRPC, indirim |
+| 0:45 | Demo: Checkout | RabbitMQ, event-driven |
+| 0:30 | Demo: Sipariş | Consumer, MassTransit |
+| 0:30 | Teknik | Swagger, Health Check |
+| 0:30 | Kapanış | Teknoloji özeti |
+| **5:00** | **TOPLAM** | |
 
 ---
 
-### 🏗️ BÖLÜM 2: Mimari Genel Bakış (0:30 - 1:30)
+## 📝 DETAYLI SENARYO
 
-**Görsel:**
-- Mimari diyagram (README.md'deki mermaid diagram)
-- Servisler arası iletişim akışı
+### 0:00 - 0:30 | GİRİŞ
+
+**Ekran:** Terminal + `docker compose ps`
 
 **Söylenecekler:**
-```
-"Projenin mimarisine bakalım. Sistem 3 katmanlı bir yapıya sahip:
-
-1. FRONTEND KATMANI:
-   - Blazor WebAssembly ile geliştirilmiş modern web arayüzü
-   - Port 3000'de çalışıyor
-
-2. API GATEWAY KATMANI:
-   - YARP (Yet Another Reverse Proxy) kullanıyor
-   - Tüm servislere tek giriş noktası sağlıyor
-   - Port 5000'de çalışıyor
-
-3. MICROSERVICE KATMANI:
-   - Catalog API: Ürün ve kategori yönetimi (Port 5001)
-   - Basket API: Sepet yönetimi, Redis cache kullanıyor (Port 5002)
-   - Ordering API: Sipariş yönetimi (Port 5003)
-   - Discount gRPC: İndirim servisi, yüksek performans için gRPC (Port 5004)
-
-SERVİSLER ARASI İLETİŞİM:
-- Senkron: Basket → Discount (gRPC ile indirim sorgulama)
-- Asenkron: Basket → Ordering (RabbitMQ ile checkout event)
-
-VERİTABANI YAPISI:
-- Her servis kendi veritabanına sahip (Database per Service pattern)
-- Catalog: PostgreSQL
-- Basket: Redis (cache) + PostgreSQL (source of truth)
-- Ordering: PostgreSQL
-- Discount: PostgreSQL"
-```
-
-**Gösterilecekler:**
-- Mimari diyagram ekranı
-- Docker Compose servis listesi
-- Veritabanı portları (5434, 5435, 5436, 5437)
+> "Merhaba, bugün eğitim amaçlı geliştirdiğim bir e-ticaret mikroservis projesini tanıtacağım.
+>
+> Gördüğünüz gibi `docker compose up` komutuyla 14 container tek seferde ayağa kalkıyor: 5 .NET servisi, 4 PostgreSQL, Redis, RabbitMQ ve Blazor UI."
 
 ---
 
-### 🎮 BÖLÜM 3: Canlı Demo - Sistem Kullanımı (1:30 - 4:30)
+### 0:30 - 1:15 | MİMARİ GENEL BAKIŞ
 
-#### 3.1. Web UI'ye Giriş ve Ürün Listeleme (1:30 - 2:00)
-
-**Görsel:**
-- Web UI ana sayfası (http://localhost:3000)
-- Ürün listesi
+**Ekran:** README'deki mimari diyagram
 
 **Söylenecekler:**
-```
-"Şimdi sistemi canlı olarak kullanalım. Web arayüzüne giriş yapıyoruz.
+> "Sistemin mimarisine bakalım:
+>
+> **3 katman var:**
+> - **Blazor WebAssembly** frontend
+> - **API Gateway** (YARP) - tek giriş noktası
+> - **4 Mikroservis**: Catalog, Basket, Ordering, Discount
+>
+> **Servisler arası iletişim:**
+> - **gRPC**: Basket → Discount (senkron, hızlı indirim sorgulama)
+> - **RabbitMQ**: Basket → Ordering (asenkron, checkout event)
+>
+> **Her servisin kendi veritabanı var** - Database per Service pattern. Basket servisi ayrıca **Redis cache** kullanıyor."
 
-Ana sayfada ürünler listeleniyor. Bu veriler Catalog Service'ten geliyor.
-API Gateway üzerinden Catalog Service'e istek atılıyor ve ürünler 
-görüntüleniyor.
+---
 
-Bir ürünün detayına bakalım..."
-```
+### 1:15 - 1:30 | BUILDINGBLOCKS
 
-**Gösterilecekler:**
-- Web UI ana sayfa
-- Ürün kartları
-- Ürün detay sayfası
+**Ekran:** BuildingBlocks klasör yapısı
+
+**Söylenecekler:**
+> "**BuildingBlocks** klasöründe tüm servislerin ortak kullandığı kodlar var:
+> - **Behaviors**: MediatR pipeline - otomatik logging ve validation
+> - **Exceptions**: Merkezi hata yönetimi - GlobalExceptionHandler
+> - **Messaging**: Servisler arası event tanımları - BasketCheckoutEvent"
+
+---
+
+### 1:30 - 2:00 | DEMO: ÜRÜN LİSTELEME
+
+**Ekran:** Web UI ana sayfa (http://localhost:3000)
+
+**Söylenecekler:**
+> "Web arayüzüne geçelim. Ana sayfada ürünler listeleniyor.
+>
+> Bu veriler şu akışla geliyor:
+> **Blazor UI → API Gateway → Catalog Service → PostgreSQL**
+>
+> Catalog Service'te **CQRS pattern** kullanıyorum - okuma ve yazma işlemleri ayrı. **MediatR** ile controller'dan handler'a istek yönlendiriliyor."
 
 **Yapılacaklar:**
 - Ana sayfayı göster
-- Bir ürünün detayına tıkla
-- Ürün bilgilerini göster
+- Bir ürüne tıkla, detay sayfasını göster
 
 ---
 
-#### 3.2. Sepete Ürün Ekleme ve İndirim Sistemi (2:00 - 2:45)
+### 2:00 - 2:45 | DEMO: SEPETE EKLEME + İNDİRİM
 
-**Görsel:**
-- Sepete ürün ekleme
-- Sepet sayfası (indirim gösterimi)
-- Terminal: Redis cache logları (opsiyonel)
+**Ekran:** Sepete ekle → Sepet sayfası
 
 **Söylenecekler:**
-```
-"Şimdi sepete ürün ekleyelim. 'Sepete Ekle' butonuna tıklıyorum.
-
-Bu işlem şunları tetikliyor:
-1. Basket Service'e istek gidiyor
-2. Basket Service, ürün için indirim var mı kontrol ediyor
-3. Discount Service'e gRPC ile bağlanıyor (çok hızlı)
-4. İndirim varsa sepete uygulanıyor
-5. Sepet hem Redis'e (cache) hem PostgreSQL'e (source of truth) kaydediliyor
-
-Sepet sayfasına gidelim. Görüyorsunuz, indirim otomatik olarak uygulandı.
-Toplam fiyat ve indirim miktarı gösteriliyor.
-
-Burada Cache-aside Pattern kullanılıyor:
-- Önce Redis'e bakılıyor (hızlı)
-- Redis'te yoksa PostgreSQL'den alınıyor ve Redis'e yazılıyor"
-```
-
-**Gösterilecekler:**
-- Sepete ürün ekleme
-- Sepet sayfası (toplam fiyat, indirim)
-- Header'da sepet sayacı (canlı güncelleme)
+> "Sepete ürün ekliyorum. Arka planda şunlar oluyor:
+>
+> 1. **gRPC ile Discount Service'e** bağlanıp indirim sorguluyor
+> 2. **PostgreSQL'e** kaydediyor - source of truth
+> 3. **Redis'e** cache'liyor - bir sonraki okuma çok hızlı
+>
+> Bu **Cache-aside Pattern**: önce cache'e bak, yoksa DB'den al ve cache'e yaz.
+>
+> Sepet sayfasında görüyorsunuz - indirim otomatik uygulandı. gRPC binary protokol kullandığı için JSON'dan 10 kat hızlı."
 
 **Yapılacaklar:**
-- 2-3 ürün sepete ekle
-- Sepet sayfasını göster
-- İndirim uygulanmış fiyatı göster
-- Ürün adetini güncelle
+- Sepete ürün ekle
+- Header'daki sepet sayacının güncellendiğini göster
+- Sepet sayfasına git
+- İndirimin uygulandığını vurgula
 
 ---
 
-#### 3.3. Checkout İşlemi ve Event-Driven Mimari (2:45 - 3:45)
+### 2:45 - 3:30 | DEMO: CHECKOUT + EVENT-DRIVEN
 
-**Görsel:**
-- Checkout sayfası
-- Ödeme formu
-- RabbitMQ Management UI (event gösterimi)
-- Ordering Service logları (opsiyonel)
+**Ekran:** Checkout sayfası → RabbitMQ Management UI (opsiyonel)
 
 **Söylenecekler:**
-```
-"Şimdi siparişi tamamlayalım. 'Ödemeye Geç' butonuna tıklıyorum.
-
-Checkout sayfasında ödeme ve teslimat bilgilerini giriyorum.
-
-Bu işlem çok önemli bir mimari özelliği gösteriyor: Event-Driven Architecture.
-
-Checkout yapıldığında:
-1. Basket Service, sepetteki bilgileri alıyor
-2. BasketCheckoutEvent oluşturuyor
-3. Event'i RabbitMQ'ya gönderiyor (asenkron)
-4. Sepeti siliyor
-5. Ordering Service, RabbitMQ'dan event'i dinliyor
-6. Event geldiğinde otomatik olarak sipariş oluşturuyor
-
-Bu asenkron yapı sayesinde:
-- Basket Service hızlıca cevap veriyor
-- Ordering Service bağımsız çalışıyor
-- Sistem daha ölçeklenebilir oluyor
-
-RabbitMQ Management UI'da event'i görebiliriz..."
-```
-
-**Gösterilecekler:**
-- Checkout sayfası
-- Form doldurma
-- RabbitMQ Management UI (http://localhost:15673)
-- Queue'da event görünümü
-- Sipariş başarı mesajı
+> "Siparişi tamamlayalım. Bu kısım **Event-Driven Architecture** örneği:
+>
+> 1. Basket Service **BasketCheckoutEvent** oluşturuyor
+> 2. **RabbitMQ'ya** publish ediyor - asenkron
+> 3. **Ordering Service** bu event'i consumer ile dinliyor
+> 4. Otomatik sipariş oluşturuyor
+>
+> **Asenkron iletişimin avantajı**: Basket Service hemen cevap veriyor, Ordering Service'i beklemiyor. Ordering down olsa bile event kuyrukta bekler."
 
 **Yapılacaklar:**
 - Checkout sayfasına git
-- Formu doldur (örnek veriler)
+- Formu doldur (örnek veriler):
+  - İsim: Test User
+  - Email: test@example.com
+  - Adres: Test Address
+  - Kart: 1234 5678 9012 3456
 - Siparişi tamamla
-- RabbitMQ UI'da event'i göster (opsiyonel)
-- Başarı mesajını göster
+- (Opsiyonel) RabbitMQ UI'da event'i göster
 
 ---
 
-#### 3.4. Sipariş Listeleme (3:45 - 4:15)
+### 3:30 - 4:00 | DEMO: SİPARİŞ LİSTELEME
 
-**Görsel:**
-- Siparişlerim sayfası
-- Sipariş listesi
-- Sipariş detayı
+**Ekran:** Siparişlerim sayfası
 
 **Söylenecekler:**
-```
-"Siparişlerim sayfasına gidelim. Görüyorsunuz, az önce oluşturduğumuz 
-sipariş burada listeleniyor.
-
-Bu veriler Ordering Service'ten geliyor. Ordering Service, RabbitMQ'dan 
-gelen event'i işleyerek siparişi PostgreSQL veritabanına kaydetmiş.
-
-Sipariş detayına bakalım. Tüm bilgiler burada: ürünler, toplam fiyat, 
-indirim miktarı, teslimat adresi..."
-```
-
-**Gösterilecekler:**
-- Siparişlerim sayfası
-- Sipariş listesi
-- Sipariş detayı
+> "Siparişlerim sayfasında az önce oluşturduğumuz sipariş görünüyor.
+>
+> **Ordering Service**'te MassTransit Consumer, RabbitMQ'dan gelen event'i alıp MediatR ile CreateOrderHandler'ı çağırdı. İndirim bilgisi de siparişe kaydedildi."
 
 **Yapılacaklar:**
 - Siparişlerim sayfasına git
 - Sipariş listesini göster
-- Bir siparişin detayına bak
+- Sipariş detayını göster
 
 ---
 
-#### 3.5. API Gateway ve Servis İzleme (4:15 - 4:30)
+### 4:00 - 4:30 | TEKNİK ÖZELLİKLER
 
-**Görsel:**
-- Swagger UI (Catalog, Basket, Ordering)
-- Health Check endpoint'leri
-- pgAdmin (veritabanı görünümü - opsiyonel)
+**Ekran:** Swagger UI + Health Check endpoint
 
 **Söylenecekler:**
-```
-"Sistemin teknik detaylarına bakalım. Her servisin kendi Swagger UI'si var.
-API Gateway üzerinden de erişilebilir.
+> "Her servisin **Swagger UI**'si var - API'leri test edebilirsiniz.
+>
+> **Health Check** endpoint'leri ile servis durumlarını izleyebilirsiniz. Gateway'de `/health/downstream` tüm servislerin durumunu toplu gösteriyor.
+>
+> **API Gateway** YARP kullanıyor - path'e göre doğru servise yönlendiriyor. CORS, authentication merkezi olarak yönetilebilir."
 
-Health Check endpoint'leri ile servislerin sağlık durumunu kontrol 
-edebiliriz. Tüm servisler sağlıklı çalışıyor.
-
-pgAdmin ile veritabanlarını inceleyebiliriz. Her servis kendi 
-veritabanına sahip, bu microservice mimarisinin temel prensibi."
-```
-
-**Gösterilecekler:**
-- Swagger UI (Catalog API)
-- Health Check endpoint (http://localhost:5000/health)
-- pgAdmin (opsiyonel, hızlıca göster)
+**Yapılacaklar:**
+- Swagger UI'ı göster (http://localhost:5001/swagger)
+- Health check endpoint'ini göster (http://localhost:5000/health)
 
 ---
 
-### 🎓 BÖLÜM 4: Teknik Özet ve Kapanış (4:30 - 5:00)
+### 4:30 - 5:00 | KAPANIŞ
 
-**Görsel:**
-- Teknoloji stack listesi
-- Proje GitHub linki (opsiyonel)
+**Ekran:** Teknoloji listesi veya terminal
 
 **Söylenecekler:**
+> "Özetleyecek olursam, bu projede kullandığım teknolojiler:
+>
+> **Backend:** .NET 9, ASP.NET Core, CQRS + MediatR, EF Core, PostgreSQL
+>
+> **İletişim:** gRPC (senkron), RabbitMQ + MassTransit (asenkron), YARP (API Gateway)
+>
+> **Cache:** Redis - Cache-aside pattern
+>
+> **Frontend:** Blazor WebAssembly
+>
+> **Infrastructure:** Docker Compose, Health Checks
+>
+> Tüm sistem tek `docker compose up` komutuyla ayağa kalkıyor. İzlediğiniz için teşekkürler."
+
+---
+
+## 🏗️ PROJE YAPISI VE BİLEŞEN AÇIKLAMALARI
+
+### 📁 BuildingBlocks (Ortak Kütüphaneler)
+
+Tüm mikroservislerin ortak kullandığı kodlar. Kod tekrarını önler.
+
+| Kütüphane | Dosyalar | Açıklama |
+|-----------|----------|----------|
+| **BuildingBlocks.Behaviors** | `LoggingBehavior.cs`, `ValidationBehavior.cs` | MediatR pipeline - her request'te otomatik logging ve FluentValidation |
+| **BuildingBlocks.Exceptions** | `GlobalExceptionHandler.cs`, `NotFoundException.cs` | Merkezi hata yönetimi, RFC 7807 ProblemDetails formatı |
+| **BuildingBlocks.Messaging** | `BasketCheckoutEvent.cs`, `IntegrationEvent.cs` | Servisler arası event tanımları |
+
+---
+
+### 📁 API Gateway (YARP)
+
+**Port:** 5000
+
+Tek giriş noktası. Microsoft YARP (Yet Another Reverse Proxy) kullanıyor.
+
+| Route | Hedef |
+|-------|-------|
+| `/catalog-service/*` | Catalog.API (5001) |
+| `/basket-service/*` | Basket.API (5002) |
+| `/ordering-service/*` | Ordering.API (5003) |
+
+**Özellikler:**
+- CORS yönetimi
+- Health Check aggregation (`/health/downstream`)
+- İleride: authentication, rate limiting
+
+---
+
+### 📁 Catalog Service
+
+**Port:** 5001 | **DB:** PostgreSQL
+
+Ürün ve kategori yönetimi.
+
+| Pattern/Teknoloji | Kullanım |
+|-------------------|----------|
+| **CQRS** | Command/Query ayrımı |
+| **MediatR** | Handler dispatch |
+| **FluentValidation** | Request validation |
+| **AutoMapper** | DTO ↔ Entity mapping |
+| **EF Core** | PostgreSQL ORM |
+
+---
+
+### 📁 Basket Service ⭐
+
+**Port:** 5002 | **DB:** PostgreSQL + Redis
+
+En karmaşık servis. 4 farklı teknoloji ile iletişim kuruyor.
+
+| Özellik | Teknoloji | Açıklama |
+|---------|-----------|----------|
+| **Cache** | Redis | Cache-aside pattern |
+| **Source of Truth** | PostgreSQL | Kalıcı veri |
+| **İndirim Sorgulama** | gRPC → Discount | Senkron, binary protokol |
+| **Checkout Event** | RabbitMQ | Asenkron, event-driven |
+
+**Cache-aside Pattern:**
 ```
-"Özet olarak, bu projede şu teknolojiler kullanıldı:
+GET Basket:
+1. Redis'te var mı? → Evet: Redis'ten döner
+2. Redis'te yok → PostgreSQL'den al → Redis'e yaz → Döner
 
-BACKEND:
-- .NET 9.0, ASP.NET Core
-- CQRS + MediatR pattern
-- Entity Framework Core
-- PostgreSQL, Redis
-
-İLETİŞİM:
-- gRPC (senkron, yüksek performans)
-- RabbitMQ + MassTransit (asenkron, event-driven)
-- YARP (API Gateway)
-
-FRONTEND:
-- Blazor WebAssembly
-- Radzen Blazor UI components
-
-INFRASTRUCTURE:
-- Docker & Docker Compose
-- Health Checks
-
-Bu proje, microservice mimarisinin temel prensiplerini ve modern 
-teknolojileri öğrenmek için mükemmel bir örnektir.
-
-Proje GitHub'da açık kaynak olarak paylaşılmıştır. 
-İzlediğiniz için teşekkürler!"
+SET Basket:
+1. PostgreSQL'e yaz (source of truth)
+2. Redis'e yaz (cache)
 ```
 
-**Gösterilecekler:**
-- Teknoloji listesi (ekran görüntüsü)
-- GitHub linki (opsiyonel)
-- Son ekran (teşekkür mesajı)
+---
+
+### 📁 Ordering Service
+
+**Port:** 5003 | **DB:** PostgreSQL
+
+RabbitMQ'dan event dinleyerek sipariş oluşturur.
+
+| Bileşen | Açıklama |
+|---------|----------|
+| **BasketCheckoutConsumer** | MassTransit consumer, RabbitMQ'dan event alır |
+| **CreateOrderHandler** | MediatR handler, sipariş oluşturur |
+
+**Event Akışı:**
+```
+RabbitMQ → Consumer → MediatR → Handler → PostgreSQL
+```
 
 ---
 
-## 🎬 VİDEO ÇEKİMİ İÇİN NOTLAR
+### 📁 Discount Service (gRPC)
 
-### Ön Hazırlık:
-1. ✅ Tüm servislerin çalıştığından emin ol (`docker compose ps`)
-2. ✅ Web UI'nin erişilebilir olduğunu kontrol et (http://localhost:3000)
-3. ✅ Örnek verilerin yüklü olduğunu kontrol et (ürünler, indirimler)
-4. ✅ RabbitMQ Management UI'ya erişim hazır (http://localhost:15673)
-5. ✅ Terminal pencereleri hazır (log izleme için)
+**Port:** 5004 (gRPC), 5005 (Health Check) | **DB:** PostgreSQL
 
-### Çekim Sırasında:
-- 🎯 Her bölümde net geçişler yap
-- 🎯 Ekran görüntülerini net göster
-- 🎯 Mouse hareketlerini yavaş ve belirgin yap
-- 🎯 Önemli noktalarda duraklama yap
-- 🎯 Terminal komutlarını yavaş yaz/göster
+Ürün bazlı indirim kuponu yönetimi.
 
-### Post-Production:
-- 🎬 Bölümler arası geçişler ekle
-- 🎬 Önemli noktalarda zoom/pan yap
-- 🎬 Alt yazı ekle (opsiyonel)
-- 🎬 Arka plan müziği ekle (hafif, dikkat dağıtmayan)
+| RPC Metodu | Açıklama |
+|------------|----------|
+| `GetDiscount` | Ürün adına göre indirim sorgular |
+| `CreateDiscount` | Yeni kupon oluşturur |
+| `UpdateDiscount` | Kuponu günceller |
+| `DeleteDiscount` | Kuponu siler |
 
----
+**Proto Dosyası:** `discount.proto`
+```protobuf
+service DiscountProtoService {
+  rpc GetDiscount (GetDiscountRequest) returns (CouponModel);
+}
+```
 
-## 📋 DEMO SENARYOSU (Adım Adım)
-
-### Senaryo: Tam Bir Alışveriş Akışı
-
-1. **Ana Sayfa** (0:10)
-   - Web UI'yi aç
-   - Ürün listesini göster
-   - "Sistemde X ürün var" de
-
-2. **Ürün Detayı** (0:15)
-   - Bir ürün seç (örn: iPhone 15)
-   - Detay sayfasını göster
-   - Fiyat, açıklama göster
-
-3. **Sepete Ekleme** (0:20)
-   - "Sepete Ekle" butonuna tıkla
-   - Header'da sepet sayacının güncellendiğini göster
-   - "Sepet sayacı canlı güncelleniyor" de
-
-4. **Sepet Yönetimi** (0:30)
-   - Sepet sayfasına git
-   - Ürünleri göster
-   - İndirim uygulanmış fiyatı göster
-   - "İndirim otomatik uygulandı, gRPC ile sorgulandı" de
-   - Ürün adetini güncelle (2'ye çıkar)
-   - Toplam fiyatın güncellendiğini göster
-
-5. **Checkout** (0:40)
-   - "Ödemeye Geç" butonuna tıkla
-   - Formu doldur:
-     - İsim: Test User
-     - Email: test@example.com
-     - Adres: Test Address
-     - Kart: 1234 5678 9012 3456
-   - "Siparişi Tamamla" butonuna tıkla
-   - "Event RabbitMQ'ya gönderildi" de
-
-6. **Sipariş Onayı** (0:20)
-   - Başarı mesajını göster
-   - "Siparişlerim" sayfasına git
-   - Sipariş listesini göster
-   - Sipariş detayını göster
-
-7. **Teknik Gösterim** (0:25)
-   - Swagger UI'yi göster (Catalog API)
-   - Health Check endpoint'ini göster
-   - "Tüm servisler sağlıklı" de
+**Port Ayrımı:**
+- 8080: HTTP/2 only (gRPC)
+- 8081: HTTP/1.1 only (Health Check)
 
 ---
 
-## 🎯 VURGULANACAK NOKTALAR
+### 📁 Web.UI (Blazor WebAssembly)
 
-### Mimari Özellikler:
-1. ✅ **Microservice Mimarisi**: Her servis bağımsız
-2. ✅ **API Gateway Pattern**: Tek giriş noktası
-3. ✅ **Database per Service**: Her servis kendi DB'si
-4. ✅ **CQRS Pattern**: Command/Query ayrımı
-5. ✅ **Event-Driven Architecture**: RabbitMQ ile asenkron iletişim
-6. ✅ **gRPC**: Yüksek performanslı senkron iletişim
-7. ✅ **Cache-aside Pattern**: Redis + PostgreSQL
+**Port:** 3000 (Docker), 5006 (Dev)
 
-### Teknolojiler:
-1. ✅ .NET 9.0, ASP.NET Core
-2. ✅ Docker & Docker Compose
-3. ✅ PostgreSQL, Redis
-4. ✅ RabbitMQ, MassTransit
-5. ✅ gRPC
-6. ✅ YARP (API Gateway)
-7. ✅ Blazor WebAssembly
+Client-side SPA. API Gateway üzerinden backend'e bağlanır.
 
-### İş Akışları:
-1. ✅ Ürün listeleme → Catalog Service
-2. ✅ Sepete ekleme → Basket Service + Discount gRPC
-3. ✅ Checkout → Basket Service → RabbitMQ → Ordering Service
-4. ✅ Sipariş listeleme → Ordering Service
+| Sayfa | Açıklama |
+|-------|----------|
+| `Index.razor` | Ürün listesi |
+| `ProductDetail.razor` | Ürün detayı |
+| `Basket.razor` | Sepet sayfası |
+| `Checkout.razor` | Ödeme formu |
+| `Orders.razor` | Sipariş geçmişi |
+
+| Servis | Açıklama |
+|--------|----------|
+| `CatalogService` | Ürün API iletişimi |
+| `BasketService` | Sepet API iletişimi |
+| `OrderingService` | Sipariş API iletişimi |
+| `BasketStateService` | Sepet sayacı state management |
 
 ---
 
-## 📊 ZAMAN YÖNETİMİ İPUÇLARI
+## ✅ ÇEKİM ÖNCESİ KONTROL LİSTESİ
 
-- ⏱️ **Giriş**: Maksimum 30 saniye (hızlı geç)
-- ⏱️ **Mimari**: 1 dakika (diyagram göster, hızlı anlat)
-- ⏱️ **Demo**: 3 dakika (en önemli kısım, detaylı göster)
-- ⏱️ **Kapanış**: 30 saniye (özet, hızlı)
+### Komutlar
+```bash
+# Tüm servisleri başlat
+docker compose up -d
 
-**Toplam: 5 dakika**
+# Container durumunu kontrol et
+docker compose ps
 
-Eğer süre yetmezse:
-- Mimari bölümünü kısalt (45 saniye)
-- Teknik gösterimi kaldır (Swagger, pgAdmin)
-- Sadece temel akışı göster (ürün → sepet → sipariş)
+# Health check
+curl http://localhost:5000/health
+curl http://localhost:5001/health
+curl http://localhost:5002/health
+curl http://localhost:5003/health
+curl http://localhost:5005/health
+```
 
----
-
-## ✅ KONTROL LİSTESİ (Çekim Öncesi)
-
+### Kontrol Listesi
 - [ ] Tüm Docker container'lar çalışıyor
 - [ ] Web UI erişilebilir (http://localhost:3000)
 - [ ] API Gateway çalışıyor (http://localhost:5000)
 - [ ] Örnek ürünler yüklü
 - [ ] Örnek indirimler yüklü
-- [ ] RabbitMQ Management UI erişilebilir
-- [ ] Terminal pencereleri hazır
+- [ ] RabbitMQ UI erişilebilir (http://localhost:15673)
 - [ ] Ekran kayıt yazılımı hazır
 - [ ] Mikrofon test edildi
-- [ ] Demo senaryosu hazır (adım adım)
 
 ---
 
-## 🎬 SON NOTLAR
+## 🔗 URL'LER
 
-- Video **5 dakikayı geçmemeli**
-- **Canlı demo** en önemli kısım (3 dakika)
-- Mimari anlatımı **kısa ve öz** olmalı
-- **Pratik örnekler** gösterilmeli
-- **Teknik detaylar** kapanışta özetlenmeli
+| Servis | URL |
+|--------|-----|
+| Web UI | http://localhost:3000 |
+| API Gateway | http://localhost:5000 |
+| Catalog Swagger | http://localhost:5001/swagger |
+| Basket Swagger | http://localhost:5002/swagger |
+| Ordering Swagger | http://localhost:5003/swagger |
+| RabbitMQ Management | http://localhost:15673 (guest/guest) |
+| RedisInsight | http://localhost:8001 |
+| pgAdmin | http://localhost:5050 (admin@admin.com/admin) |
+
+---
+
+## 🎯 VURGULANACAK MİMARİ ÖZELLİKLER
+
+1. ✅ **Microservice Architecture** - Her servis bağımsız
+2. ✅ **API Gateway Pattern** - YARP ile tek giriş noktası
+3. ✅ **Database per Service** - Her servis kendi DB'si
+4. ✅ **CQRS Pattern** - Command/Query ayrımı
+5. ✅ **Event-Driven Architecture** - RabbitMQ ile asenkron
+6. ✅ **gRPC** - Yüksek performanslı senkron iletişim
+7. ✅ **Cache-aside Pattern** - Redis + PostgreSQL
+
+---
+
+## 🛠️ KULLANILAN TEKNOLOJİLER
+
+### Backend
+- .NET 9.0, ASP.NET Core
+- CQRS + MediatR
+- FluentValidation
+- AutoMapper
+- Entity Framework Core
+- PostgreSQL
+
+### İletişim
+- gRPC (senkron)
+- RabbitMQ + MassTransit (asenkron)
+- YARP (API Gateway)
+
+### Cache
+- Redis (Cache-aside pattern)
+
+### Frontend
+- Blazor WebAssembly
+
+### Infrastructure
+- Docker & Docker Compose
+- Health Checks
+
+---
 
 **Başarılar! 🚀**
