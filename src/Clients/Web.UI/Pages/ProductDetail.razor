@@ -4,52 +4,54 @@
 @inject UserStateService UserStateService
 @inject BasketStateService BasketStateService
 @inject NavigationManager Navigation
+@inject NotificationService NotificationService
 
 <PageTitle>@(product?.Name ?? "Ürün Detayı")</PageTitle>
 
-<div class="container mt-4">
+<RadzenStack Gap="1.5rem">
     @if (product == null)
     {
-        <div class="text-center">
-            <div class="spinner-border" role="status">
-                <span class="visually-hidden">Yükleniyor...</span>
-            </div>
-        </div>
+        <RadzenStack AlignItems="AlignItems.Center" JustifyContent="JustifyContent.Center" Style="min-height: 400px;">
+            <RadzenProgressBarCircular ShowValue="false" Size="ProgressBarCircularSize.Large" />
+        </RadzenStack>
     }
     else
     {
-        <div class="row">
-            <div class="col-md-6">
+        <RadzenRow Gap="2rem">
+            <RadzenColumn Size="12" SizeMD="6">
                 @if (!string.IsNullOrEmpty(product.ImageUrl))
                 {
-                    <img src="@product.ImageUrl" class="img-fluid" alt="@product.Name">
+                    <RadzenImage Path="@product.ImageUrl" Alt="@product.Name" Style="width: 100%; max-height: 500px; object-fit: contain;" />
                 }
                 else
                 {
-                    <div class="bg-secondary d-flex align-items-center justify-content-center" style="height: 400px;">
-                        <span class="text-white">Resim Yok</span>
+                    <div style="width: 100%; height: 400px; background-color: var(--rz-base-300); display: flex; align-items: center; justify-content: center;">
+                        <RadzenLabel Text="Resim Yok" Style="color: var(--rz-text-secondary-color);" />
                     </div>
                 }
-            </div>
-            <div class="col-md-6">
-                <h1>@product.Name</h1>
-                <p class="text-muted">Kategori: @product.CategoryName</p>
-                <h3 class="text-primary">@product.Price.ToString("C")</h3>
-                <p>@(product.Description ?? "Açıklama yok")</p>
-                
-                <div class="mb-3">
-                    <label for="quantity" class="form-label">Miktar:</label>
-                    <input type="number" class="form-control" id="quantity" @bind="quantity" min="1" style="max-width: 100px;" />
-                </div>
-                
-                <button class="btn btn-primary btn-lg" @onclick="AddToBasket">
-                    Sepete Ekle (@quantity adet)
-                </button>
-                <a href="/" class="btn btn-secondary btn-lg ms-2">Geri Dön</a>
-            </div>
-        </div>
+            </RadzenColumn>
+            <RadzenColumn Size="12" SizeMD="6">
+                <RadzenStack Gap="1rem">
+                    <RadzenHeading Size="HeadingSize.H1" Text="@product.Name" />
+                    <RadzenLabel Style="color: var(--rz-text-secondary-color);">
+                        Kategori: @product.CategoryName
+                    </RadzenLabel>
+                    <RadzenHeading Size="HeadingSize.H3" Text="@product.Price.ToString("C")" Style="color: var(--rz-primary);" />
+                    <RadzenLabel Text="@(product.Description ?? "Açıklama yok")" />
+                    
+                    <RadzenFormField Text="Miktar" Style="max-width: 200px;">
+                        <RadzenNumeric @bind-Value="@quantity" Min="1" Style="width: 100%;" />
+                    </RadzenFormField>
+                    
+                    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem">
+                        <RadzenButton Text="@($"Sepete Ekle ({quantity} adet)")" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Large" Click="@AddToBasket" />
+                        <RadzenButton Text="Geri Dön" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Size="ButtonSize.Large" Click="@(() => Navigation.NavigateTo("/"))" />
+                    </RadzenStack>
+                </RadzenStack>
+            </RadzenColumn>
+        </RadzenRow>
     }
-</div>
+</RadzenStack>
 
 @code {
     [Parameter]
@@ -99,11 +101,26 @@
             basket = await BasketService.StoreBasketAsync(basket);
             BasketStateService.UpdateItemCount(basket.Items.Sum(i => i.Quantity));
             
+            NotificationService.Notify(new NotificationMessage 
+            { 
+                Severity = NotificationSeverity.Success, 
+                Summary = "Başarılı", 
+                Detail = $"{product.Name} ({quantity} adet) sepete eklendi", 
+                Duration = 3000 
+            });
+            
             Navigation.NavigateTo("/basket");
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error adding to basket: {ex.Message}");
+            NotificationService.Notify(new NotificationMessage 
+            { 
+                Severity = NotificationSeverity.Error, 
+                Summary = "Hata", 
+                Detail = "Ürün sepete eklenirken bir hata oluştu", 
+                Duration = 4000 
+            });
         }
     }
 }

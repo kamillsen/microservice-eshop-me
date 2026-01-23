@@ -1,11 +1,13 @@
 @inject BasketStateService BasketStateService
+@inject NavigationManager Navigation
 
-@if (itemCount > 0)
-{
-    <a href="/basket" class="btn btn-outline-light">
-        <span>🛒 Sepet (@itemCount)</span>
-    </a>
-}
+<div style="position: relative; display: inline-block;">
+    <RadzenButton Icon="shopping_cart" Text="Sepetim" Click="@(() => Navigation.NavigateTo("/basket"))" Variant="Variant.Flat" ButtonStyle="ButtonStyle.Light" />
+    @if (itemCount > 0)
+    {
+        <RadzenBadge BadgeStyle="BadgeStyle.Danger" Text="@itemCount.ToString()" Style="position: absolute; top: -8px; right: -8px; min-width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;" />
+    }
+</div>
 
 @implements IDisposable
 

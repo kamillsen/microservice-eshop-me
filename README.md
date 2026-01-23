@@ -77,6 +77,7 @@ Bu proje, **microservice mimarisini öğrenmek** ve modern teknolojileri pratik 
 
 ### Frontend
 - **Blazor WebAssembly** - Client-side web UI framework
+- **Radzen Blazor** - Modern UI component library
 - **Bootstrap** - CSS framework for responsive design
 - **JavaScript Interop** - Browser API integration
 
@@ -171,15 +172,19 @@ Sepet Kaydetme:
 ### 1. Web UI (Blazor WebAssembly)
 
 **Port:** 3000 (Docker), 5006 (Development)  
-**Açıklama:** Kullanıcı arayüzü
+**Açıklama:** Modern ve responsive kullanıcı arayüzü  
+**UI Framework:** Radzen Blazor
 
 **Özellikler:**
 - Ürün listeleme ve detay görüntüleme
 - Sepet yönetimi (ekleme, güncelleme, silme)
+- Sepet sayacı (header'da canlı güncelleme)
 - Checkout (ödeme) işlemi
 - Sipariş listeleme
-- Responsive tasarım (Bootstrap)
+- Responsive tasarım (Radzen Blazor + Bootstrap)
+- Modern UI bileşenleri (Radzen Blazor)
 - API Gateway üzerinden backend servislerle iletişim
+- State management (BasketStateService)
 
 ### 2. Catalog Service (Ürün Kataloğu)
 
@@ -269,6 +274,10 @@ Sepet Kaydetme:
 ### Communication
 - **gRPC** - RPC framework
 - **YARP** - Reverse proxy
+
+### Frontend
+- **Blazor WebAssembly** - Client-side web framework
+- **Radzen Blazor** - UI component library
 
 ### Infrastructure
 - **Docker** - Containerization

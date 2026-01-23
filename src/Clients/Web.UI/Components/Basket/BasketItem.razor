@@ -1,30 +1,30 @@
 @using Web.UI.Models
 
-<div class="card mb-3">
-    <div class="card-body">
-        <div class="row align-items-center">
-            <div class="col-md-6">
-                <h5 class="card-title">@Item.ProductName</h5>
-                <p class="text-muted mb-0">Birim Fiyat: @Item.Price.ToString("C")</p>
-            </div>
-            <div class="col-md-3">
-                <div class="input-group">
-                    <button class="btn btn-outline-secondary" type="button" @onclick="DecreaseQuantity">-</button>
-                    <input type="number" class="form-control text-center" value="@Item.Quantity" @onchange="OnQuantityChanged" min="1" />
-                    <button class="btn btn-outline-secondary" type="button" @onclick="IncreaseQuantity">+</button>
-                </div>
-            </div>
-            <div class="col-md-2 text-end">
-                <strong>@((Item.Price * Item.Quantity).ToString("C"))</strong>
-            </div>
-            <div class="col-md-1">
-                <button class="btn btn-danger btn-sm" @onclick="() => OnRemove.InvokeAsync(Item)">
-                    ✕
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
+<RadzenCard>
+    <RadzenRow AlignItems="AlignItems.Center" Gap="1rem">
+        <RadzenColumn Size="12" SizeMD="6">
+            <RadzenStack Gap="0.25rem">
+                <RadzenHeading Size="HeadingSize.H5" Text="@Item.ProductName" />
+                <RadzenLabel Style="color: var(--rz-text-secondary-color);">
+                    Birim Fiyat: @Item.Price.ToString("C")
+                </RadzenLabel>
+            </RadzenStack>
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="3">
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                <RadzenButton Icon="remove" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Size="ButtonSize.Small" Click="@DecreaseQuantity" Disabled="@(Item.Quantity <= 1)" />
+                <RadzenNumeric TValue="int" Value="@Item.Quantity" Min="1" Style="width: 80px;" ValueChanged="@OnQuantityChanged" />
+                <RadzenButton Icon="add" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Size="ButtonSize.Small" Click="@IncreaseQuantity" />
+            </RadzenStack>
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="2">
+            <RadzenLabel Text="@((Item.Price * Item.Quantity).ToString("C"))" Style="font-weight: 600; text-align: right;" />
+        </RadzenColumn>
+        <RadzenColumn Size="12" SizeMD="1">
+            <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small" Click="@(() => OnRemove.InvokeAsync(Item))" />
+        </RadzenColumn>
+    </RadzenRow>
+</RadzenCard>
 
 @code {
     [Parameter]
@@ -51,11 +51,11 @@
         }
     }
 
-    private async Task OnQuantityChanged(ChangeEventArgs e)
+    private async Task OnQuantityChanged(int value)
     {
-        if (int.TryParse(e.Value?.ToString(), out int quantity) && quantity > 0)
+        if (value > 0)
         {
-            Item.Quantity = quantity;
+            Item.Quantity = value;
             await OnUpdate.InvokeAsync();
         }
     }

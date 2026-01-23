@@ -6,63 +6,65 @@
 
 <PageTitle>Sepetim</PageTitle>
 
-<div class="container mt-4">
-    <h1 class="mb-4">Sepetim</h1>
+<RadzenStack Gap="1.5rem">
+    <RadzenHeading Size="HeadingSize.H1" Text="Sepetim" />
 
     @if (basket == null)
     {
-        <div class="text-center">
-            <div class="spinner-border" role="status">
-                <span class="visually-hidden">Yükleniyor...</span>
-            </div>
-        </div>
+        <RadzenStack AlignItems="AlignItems.Center" JustifyContent="JustifyContent.Center" Style="min-height: 200px;">
+            <RadzenProgressBarCircular ShowValue="false" Size="ProgressBarCircularSize.Large" />
+        </RadzenStack>
     }
     else if (!basket.Items.Any())
     {
-        <div class="alert alert-info">
-            Sepetiniz boş. <a href="/">Alışverişe başlamak için tıklayın</a>
-        </div>
+        <RadzenAlert AlertStyle="AlertStyle.Info" Title="Sepetiniz boş">
+            <ChildContent>
+                <RadzenLink Path="/" Text="Alışverişe başlamak için tıklayın" />
+            </ChildContent>
+        </RadzenAlert>
     }
     else
     {
-        <div class="row">
-            <div class="col-md-8">
-                @foreach (var item in basket.Items)
-                {
-                    <BasketItem Item="item" OnUpdate="UpdateBasket" OnRemove="RemoveItem" />
-                }
-            </div>
-            <div class="col-md-4">
-                <div class="card">
-                    <div class="card-header">
-                        <h5>Sipariş Özeti</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between mb-2">
-                            <span>Ara Toplam:</span>
-                            <strong>@((basket.TotalPrice + basket.Discount).ToString("C"))</strong>
-                        </div>
-                        @if (basket.Discount > 0)
-                        {
-                            <div class="d-flex justify-content-between mb-2 text-success">
-                                <span>İndirim:</span>
-                                <strong>-@basket.Discount.ToString("C")</strong>
-                            </div>
-                        }
-                        <hr>
-                        <div class="d-flex justify-content-between mb-3">
-                            <span><strong>Toplam:</strong></span>
-                            <strong class="text-primary">@basket.TotalPrice.ToString("C")</strong>
-                        </div>
-                        <button class="btn btn-primary w-100 btn-lg" @onclick="NavigateToCheckout">
-                            Ödemeye Geç
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <RadzenRow Gap="1.5rem">
+            <RadzenColumn Size="12" SizeMD="8">
+                <RadzenStack Gap="1rem">
+                    @foreach (var item in basket.Items)
+                    {
+                        <BasketItem Item="item" OnUpdate="UpdateBasket" OnRemove="RemoveItem" />
+                    }
+                </RadzenStack>
+            </RadzenColumn>
+            <RadzenColumn Size="12" SizeMD="4">
+                <RadzenCard>
+                    <RadzenStack Gap="1rem">
+                        <RadzenHeading Size="HeadingSize.H5" Text="Sipariş Özeti" />
+                        <RadzenStack Gap="0.5rem">
+                            <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween">
+                                <RadzenLabel Text="Ara Toplam:" />
+                                <RadzenLabel Text="@((basket.TotalPrice + basket.Discount).ToString("C"))" Style="font-weight: 600;" />
+                            </RadzenStack>
+                            @if (basket.Discount > 0)
+                            {
+                                <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween">
+                                    <RadzenLabel Text="İndirim:" Style="color: var(--rz-success);" />
+                                    <RadzenLabel Style="font-weight: 600; color: var(--rz-success);">
+                                        -@basket.Discount.ToString("C")
+                                    </RadzenLabel>
+                                </RadzenStack>
+                            }
+                            <hr style="margin: 0.5rem 0; border: none; border-top: 1px solid var(--rz-border-color);" />
+                            <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween">
+                                <RadzenLabel Text="Toplam:" Style="font-weight: 600;" />
+                                <RadzenLabel Text="@basket.TotalPrice.ToString("C")" Style="font-size: 1.25rem; font-weight: 600; color: var(--rz-primary);" />
+                            </RadzenStack>
+                        </RadzenStack>
+                        <RadzenButton Text="Ödemeye Geç" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Large" Click="@NavigateToCheckout" Style="width: 100%;" />
+                    </RadzenStack>
+                </RadzenCard>
+            </RadzenColumn>
+        </RadzenRow>
     }
-</div>
+</RadzenStack>
 
 @code {
     private ShoppingCartDto? basket;
