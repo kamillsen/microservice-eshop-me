@@ -105,7 +105,10 @@ builder.Services.AddProblemDetails();
 
 // Health Checks
 builder.Services.AddHealthChecks()
-    .AddRedis(builder.Configuration.GetConnectionString("Redis")!)
+    .AddRedis(
+        builder.Configuration.GetConnectionString("Redis")!,
+        timeout: TimeSpan.FromSeconds(10),
+        tags: new[] { "redis", "ready" })
     .AddNpgSql(builder.Configuration.GetConnectionString("Database")!);
 
 var app = builder.Build();

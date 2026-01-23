@@ -149,7 +149,7 @@ services:
       dockerfile: src/Services/Basket/Basket.API/Dockerfile
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__Redis=basketdb:6379
+      - ConnectionStrings__Redis=basketdb:6379,connectTimeout=10000,syncTimeout=10000,abortConnect=false,connectRetry=3
       - ConnectionStrings__Database=Host=basketpostgres;Port=5432;Database=BasketDb;Username=postgres;Password=postgres
       - GrpcSettings__DiscountUrl=http://discount.grpc:8080
       - MessageBroker__Host=amqp://guest:guest@messagebroker:5672

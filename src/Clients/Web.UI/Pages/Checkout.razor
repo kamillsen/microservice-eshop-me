@@ -30,73 +30,97 @@
             <RadzenColumn Size="12" SizeMD="8">
                 <RadzenStack Gap="1.5rem">
                     <RadzenCard>
-                        <RadzenStack Gap="1rem">
+                        <RadzenStack Gap="1.5rem">
                             <RadzenHeading Size="HeadingSize.H5" Text="Adres Bilgileri" />
                             <RadzenTemplateForm Data="@checkoutCommand">
-                                <RadzenRow Gap="1rem">
-                                    <RadzenColumn Size="12" SizeMD="6">
-                                        <RadzenFormField Text="Ad" Required="true">
-                                            <RadzenTextBox @bind-Value="@checkoutCommand.FirstName" Style="width: 100%;" />
-                                        </RadzenFormField>
-                                    </RadzenColumn>
-                                    <RadzenColumn Size="12" SizeMD="6">
-                                        <RadzenFormField Text="Soyad" Required="true">
-                                            <RadzenTextBox @bind-Value="@checkoutCommand.LastName" Style="width: 100%;" />
-                                        </RadzenFormField>
-                                    </RadzenColumn>
-                                </RadzenRow>
-                                <RadzenFormField Text="E-posta" Required="true">
-                                    <RadzenTextBox @bind-Value="@checkoutCommand.EmailAddress" Type="email" Style="width: 100%;" />
-                                </RadzenFormField>
-                                <RadzenFormField Text="Adres Satırı" Required="true">
-                                    <RadzenTextBox @bind-Value="@checkoutCommand.AddressLine" Style="width: 100%;" />
-                                </RadzenFormField>
-                                <RadzenRow Gap="1rem">
-                                    <RadzenColumn Size="12" SizeMD="4">
-                                        <RadzenFormField Text="Ülke" Required="true">
-                                            <RadzenTextBox @bind-Value="@checkoutCommand.Country" Style="width: 100%;" />
-                                        </RadzenFormField>
-                                    </RadzenColumn>
-                                    <RadzenColumn Size="12" SizeMD="4">
-                                        <RadzenFormField Text="Şehir" Required="true">
-                                            <RadzenTextBox @bind-Value="@checkoutCommand.State" Style="width: 100%;" />
-                                        </RadzenFormField>
-                                    </RadzenColumn>
-                                    <RadzenColumn Size="12" SizeMD="4">
-                                        <RadzenFormField Text="Posta Kodu" Required="true">
-                                            <RadzenTextBox @bind-Value="@checkoutCommand.ZipCode" Style="width: 100%;" />
-                                        </RadzenFormField>
-                                    </RadzenColumn>
-                                </RadzenRow>
+                                <RadzenStack Gap="1.25rem">
+                                    <RadzenRow Gap="1rem">
+                                        <RadzenColumn Size="12" SizeMD="6">
+                                            <RadzenFormField Text="Ad" Required="true">
+                                                <RadzenTextBox @bind-Value="@checkoutCommand.FirstName" Style="width: 100%;" />
+                                            </RadzenFormField>
+                                        </RadzenColumn>
+                                        <RadzenColumn Size="12" SizeMD="6">
+                                            <RadzenFormField Text="Soyad" Required="true">
+                                                <RadzenTextBox @bind-Value="@checkoutCommand.LastName" Style="width: 100%;" />
+                                            </RadzenFormField>
+                                        </RadzenColumn>
+                                    </RadzenRow>
+                                    <RadzenRow Gap="1rem">
+                                        <RadzenColumn Size="12">
+                                            <RadzenFormField Text="E-posta" Required="true">
+                                                <RadzenTextBox @bind-Value="@checkoutCommand.EmailAddress" Type="email" Style="width: 100%;" />
+                                            </RadzenFormField>
+                                        </RadzenColumn>
+                                    </RadzenRow>
+                                    <RadzenRow Gap="1rem">
+                                        <RadzenColumn Size="12">
+                                            <RadzenFormField Text="Adres Satırı" Required="true">
+                                                <RadzenTextBox @bind-Value="@checkoutCommand.AddressLine" Style="width: 100%;" />
+                                            </RadzenFormField>
+                                        </RadzenColumn>
+                                    </RadzenRow>
+                                    <RadzenRow Gap="1rem">
+                                        <RadzenColumn Size="12" SizeMD="4">
+                                            <RadzenFormField Text="Ülke" Required="true">
+                                                <RadzenTextBox @bind-Value="@checkoutCommand.Country" Style="width: 100%;" />
+                                            </RadzenFormField>
+                                        </RadzenColumn>
+                                        <RadzenColumn Size="12" SizeMD="4">
+                                            <RadzenFormField Text="Şehir" Required="true">
+                                                <RadzenTextBox @bind-Value="@checkoutCommand.State" Style="width: 100%;" />
+                                            </RadzenFormField>
+                                        </RadzenColumn>
+                                        <RadzenColumn Size="12" SizeMD="4">
+                                            <RadzenFormField Text="Posta Kodu" Required="true">
+                                                <RadzenTextBox @bind-Value="@checkoutCommand.ZipCode" Style="width: 100%;" />
+                                            </RadzenFormField>
+                                        </RadzenColumn>
+                                    </RadzenRow>
+                                </RadzenStack>
                             </RadzenTemplateForm>
                         </RadzenStack>
                     </RadzenCard>
 
                     <RadzenCard>
-                        <RadzenStack Gap="1rem">
+                        <RadzenStack Gap="1.5rem">
                             <RadzenHeading Size="HeadingSize.H5" Text="Ödeme Bilgileri" />
                             <RadzenTemplateForm Data="@checkoutCommand">
-                                <RadzenFormField Text="Kart Üzerindeki İsim" Required="true">
-                                    <RadzenTextBox @bind-Value="@checkoutCommand.CardName" Style="width: 100%;" />
-                                </RadzenFormField>
-                                <RadzenFormField Text="Kart Numarası" Required="true">
-                                    <RadzenTextBox @bind-Value="@checkoutCommand.CardNumber" MaxLength="16" Style="width: 100%;" />
-                                </RadzenFormField>
-                                <RadzenRow Gap="1rem">
-                                    <RadzenColumn Size="12" SizeMD="6">
-                                        <RadzenFormField Text="Son Kullanma Tarihi (MM/YY)" Required="true">
-                                            <RadzenTextBox @bind-Value="@checkoutCommand.Expiration" Placeholder="12/26" Style="width: 100%;" />
-                                        </RadzenFormField>
-                                    </RadzenColumn>
-                                    <RadzenColumn Size="12" SizeMD="6">
-                                        <RadzenFormField Text="CVV" Required="true">
-                                            <RadzenTextBox @bind-Value="@checkoutCommand.CVV" MaxLength="3" Style="width: 100%;" />
-                                        </RadzenFormField>
-                                    </RadzenColumn>
-                                </RadzenRow>
-                                <RadzenFormField Text="Ödeme Yöntemi" Required="true">
-                                    <RadzenDropDown @bind-Value="@checkoutCommand.PaymentMethod" Data="@paymentMethods" TextProperty="Text" ValueProperty="Value" Style="width: 100%;" />
-                                </RadzenFormField>
+                                <RadzenStack Gap="1.25rem">
+                                    <RadzenRow Gap="1rem">
+                                        <RadzenColumn Size="12">
+                                            <RadzenFormField Text="Kart Üzerindeki İsim" Required="true">
+                                                <RadzenTextBox @bind-Value="@checkoutCommand.CardName" Style="width: 100%;" />
+                                            </RadzenFormField>
+                                        </RadzenColumn>
+                                    </RadzenRow>
+                                    <RadzenRow Gap="1rem">
+                                        <RadzenColumn Size="12">
+                                            <RadzenFormField Text="Kart Numarası" Required="true">
+                                                <RadzenTextBox @bind-Value="@checkoutCommand.CardNumber" MaxLength="16" Style="width: 100%;" />
+                                            </RadzenFormField>
+                                        </RadzenColumn>
+                                    </RadzenRow>
+                                    <RadzenRow Gap="1rem">
+                                        <RadzenColumn Size="12" SizeMD="6">
+                                            <RadzenFormField Text="Son Kullanma Tarihi (MM/YY)" Required="true">
+                                                <RadzenTextBox @bind-Value="@checkoutCommand.Expiration" Placeholder="12/26" Style="width: 100%;" />
+                                            </RadzenFormField>
+                                        </RadzenColumn>
+                                        <RadzenColumn Size="12" SizeMD="6">
+                                            <RadzenFormField Text="CVV" Required="true">
+                                                <RadzenTextBox @bind-Value="@checkoutCommand.CVV" MaxLength="3" Style="width: 100%;" />
+                                            </RadzenFormField>
+                                        </RadzenColumn>
+                                    </RadzenRow>
+                                    <RadzenRow Gap="1rem">
+                                        <RadzenColumn Size="12">
+                                            <RadzenFormField Text="Ödeme Yöntemi" Required="true">
+                                                <RadzenDropDown @bind-Value="@checkoutCommand.PaymentMethod" Data="@paymentMethods" TextProperty="Text" ValueProperty="Value" Style="width: 100%;" />
+                                            </RadzenFormField>
+                                        </RadzenColumn>
+                                    </RadzenRow>
+                                </RadzenStack>
                             </RadzenTemplateForm>
                         </RadzenStack>
                     </RadzenCard>
@@ -135,12 +159,17 @@
                                 <RadzenLabel Text="@((basket.TotalPrice - basket.Discount).ToString("C"))" Style="font-size: 1.25rem; font-weight: 600; color: var(--rz-primary);" />
                             </RadzenStack>
                         </RadzenStack>
-                        <RadzenButton Text="Siparişi Tamamla" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Large" Click="@SubmitCheckout" Disabled="@isProcessing" Style="width: 100%;">
-                            @if (isProcessing)
-                            {
-                                <RadzenProgressBarCircular ShowValue="false" Size="ProgressBarCircularSize.Small" Style="margin-right: 0.5rem;" />
-                            }
-                        </RadzenButton>
+                        @if (isProcessing)
+                        {
+                            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.Center" Gap="0.5rem" Style="padding: 0.75rem; background-color: var(--rz-primary); color: white; border-radius: var(--rz-border-radius); width: 100%;">
+                                <RadzenProgressBarCircular ShowValue="false" Size="ProgressBarCircularSize.Small" />
+                                <span>İşleniyor...</span>
+                            </RadzenStack>
+                        }
+                        else
+                        {
+                            <RadzenButton Text="Siparişi Tamamla" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Large" Click="@SubmitCheckout" Disabled="@isProcessing" Style="width: 100%;" />
+                        }
                     </RadzenStack>
                 </RadzenCard>
             </RadzenColumn>
