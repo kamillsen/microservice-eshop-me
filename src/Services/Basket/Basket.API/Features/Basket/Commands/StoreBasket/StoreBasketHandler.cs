@@ -61,19 +61,25 @@ public class StoreBasketHandler : IRequestHandler<StoreBasketCommand, ShoppingCa
         // ADIM 3: Kaydedilen Entity'yi DTO'ya map et (frontend'e döndürmek için)
         var basketDto = _mapper.Map<ShoppingCartDto>(savedBasket);
 
-        // ADIM 4: Her ürün için Discount gRPC servisinden indirim sorgula
+        // ADIM 4: Her ürün için Discount gRPC servisinden indirim sorgula ve item'lara ekle
         decimal totalDiscount = 0;
-        foreach (var item in savedBasket.Items)
+        foreach (var itemDto in basketDto.Items)
         {
-            var coupon = await _discountGrpcService.GetDiscount(item.ProductName);
+            var coupon = await _discountGrpcService.GetDiscount(itemDto.ProductName);
             if (coupon.Amount > 0)
             {
-                // İndirim miktarı × ürün adedi = toplam indirim
-                totalDiscount += coupon.Amount * item.Quantity;
+                // Her ürün için indirim miktarı × ürün adedi
+                var itemDiscount = coupon.Amount * itemDto.Quantity;
+                itemDto.Discount = itemDiscount;
+                totalDiscount += itemDiscount;
+            }
+            else
+            {
+                itemDto.Discount = 0;
             }
         }
 
-        // ADIM 5: Discount'ı DTO'ya ekle
+        // ADIM 5: Toplam indirimi sepete ekle
         basketDto.Discount = totalDiscount;
         basketDto.TotalPrice = savedBasket.TotalPrice - totalDiscount; // İndirimli fiyatı hesapla
 

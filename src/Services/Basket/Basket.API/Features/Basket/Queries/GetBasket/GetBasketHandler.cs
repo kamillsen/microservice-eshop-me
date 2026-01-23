@@ -58,21 +58,29 @@ public class GetBasketHandler : IRequestHandler<GetBasketQuery, ShoppingCartDto>
             };
         }
 
-        // ADIM 2: Her ürün için Discount gRPC servisinden indirim sorgula
+        // ADIM 2: Entity'yi DTO'ya map et (frontend'e göndermek için)
+        var basketDto = _mapper.Map<ShoppingCartDto>(basket);
+
+        // ADIM 3: Her ürün için Discount gRPC servisinden indirim sorgula ve item'lara ekle
         // Örnek: "iPhone 15" ürünü için %10 indirim varsa, o indirimi hesapla
         decimal totalDiscount = 0;
-        foreach (var item in basket.Items)
+        foreach (var itemDto in basketDto.Items)
         {
-            var coupon = await _discountGrpcService.GetDiscount(item.ProductName);
+            var coupon = await _discountGrpcService.GetDiscount(itemDto.ProductName);
             if (coupon.Amount > 0)
             {
-                // İndirim miktarı × ürün adedi = toplam indirim
-                totalDiscount += coupon.Amount * item.Quantity;
+                // Her ürün için indirim miktarı × ürün adedi
+                var itemDiscount = coupon.Amount * itemDto.Quantity;
+                itemDto.Discount = itemDiscount;
+                totalDiscount += itemDiscount;
+            }
+            else
+            {
+                itemDto.Discount = 0;
             }
         }
 
-        // ADIM 3: Entity'yi DTO'ya map et (frontend'e göndermek için)
-        var basketDto = _mapper.Map<ShoppingCartDto>(basket);
+        // ADIM 4: Toplam indirimi sepete ekle
         basketDto.Discount = totalDiscount; // Toplam indirim miktarını ekle
         basketDto.TotalPrice = basket.TotalPrice - totalDiscount; // İndirimli fiyatı hesapla
 

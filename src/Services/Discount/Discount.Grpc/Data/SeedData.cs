@@ -21,7 +21,7 @@ public static class SeedData
             },
             new()
             {
-                ProductName = "Samsung S24",
+                ProductName = "Samsung Galaxy S24",
                 Description = "Kış kampanyası",
                 Amount = 6750
             },

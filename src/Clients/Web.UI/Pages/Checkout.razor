@@ -3,152 +3,166 @@
 @inject UserStateService UserStateService
 @inject BasketStateService BasketStateService
 @inject NavigationManager Navigation
+@inject NotificationService NotificationService
 
 <PageTitle>Ödeme</PageTitle>
 
-<div class="container mt-4">
-    <h1 class="mb-4">Ödeme</h1>
+<RadzenStack Gap="1.5rem">
+    <RadzenHeading Size="HeadingSize.H1" Text="Ödeme" />
 
     @if (basket == null)
     {
-        <div class="text-center">
-            <div class="spinner-border" role="status">
-                <span class="visually-hidden">Yükleniyor...</span>
-            </div>
-        </div>
+        <RadzenStack AlignItems="AlignItems.Center" JustifyContent="JustifyContent.Center" Style="min-height: 200px;">
+            <RadzenProgressBarCircular ShowValue="false" Size="ProgressBarCircularSize.Large" />
+        </RadzenStack>
     }
     else if (!basket.Items.Any())
     {
-        <div class="alert alert-warning">
-            Sepetiniz boş. <a href="/">Alışverişe başlamak için tıklayın</a>
-        </div>
+        <RadzenAlert AlertStyle="AlertStyle.Warning" Title="Sepetiniz boş">
+            <ChildContent>
+                <RadzenLink Path="/" Text="Alışverişe başlamak için tıklayın" />
+            </ChildContent>
+        </RadzenAlert>
     }
     else
     {
-        <div class="row">
-            <div class="col-md-8">
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5>Adres Bilgileri</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <label class="form-label">Ad *</label>
-                                <input type="text" class="form-control" @bind="checkoutCommand.FirstName" required />
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Soyad *</label>
-                                <input type="text" class="form-control" @bind="checkoutCommand.LastName" required />
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">E-posta *</label>
-                            <input type="email" class="form-control" @bind="checkoutCommand.EmailAddress" required />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Adres Satırı *</label>
-                            <input type="text" class="form-control" @bind="checkoutCommand.AddressLine" required />
-                        </div>
-                        <div class="row mb-3">
-                            <div class="col-md-4">
-                                <label class="form-label">Ülke *</label>
-                                <input type="text" class="form-control" @bind="checkoutCommand.Country" required />
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label">Şehir *</label>
-                                <input type="text" class="form-control" @bind="checkoutCommand.State" required />
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label">Posta Kodu *</label>
-                                <input type="text" class="form-control" @bind="checkoutCommand.ZipCode" required />
-                            </div>
-                        </div>
-                    </div>
-                </div>
+        <RadzenRow Gap="1.5rem">
+            <RadzenColumn Size="12" SizeMD="8">
+                <RadzenStack Gap="1.5rem">
+                    <RadzenCard>
+                        <RadzenStack Gap="1rem">
+                            <RadzenHeading Size="HeadingSize.H5" Text="Adres Bilgileri" />
+                            <RadzenTemplateForm Data="@checkoutCommand">
+                                <RadzenRow Gap="1rem">
+                                    <RadzenColumn Size="12" SizeMD="6">
+                                        <RadzenFormField Text="Ad" Required="true">
+                                            <RadzenTextBox @bind-Value="@checkoutCommand.FirstName" Style="width: 100%;" />
+                                        </RadzenFormField>
+                                    </RadzenColumn>
+                                    <RadzenColumn Size="12" SizeMD="6">
+                                        <RadzenFormField Text="Soyad" Required="true">
+                                            <RadzenTextBox @bind-Value="@checkoutCommand.LastName" Style="width: 100%;" />
+                                        </RadzenFormField>
+                                    </RadzenColumn>
+                                </RadzenRow>
+                                <RadzenFormField Text="E-posta" Required="true">
+                                    <RadzenTextBox @bind-Value="@checkoutCommand.EmailAddress" Type="email" Style="width: 100%;" />
+                                </RadzenFormField>
+                                <RadzenFormField Text="Adres Satırı" Required="true">
+                                    <RadzenTextBox @bind-Value="@checkoutCommand.AddressLine" Style="width: 100%;" />
+                                </RadzenFormField>
+                                <RadzenRow Gap="1rem">
+                                    <RadzenColumn Size="12" SizeMD="4">
+                                        <RadzenFormField Text="Ülke" Required="true">
+                                            <RadzenTextBox @bind-Value="@checkoutCommand.Country" Style="width: 100%;" />
+                                        </RadzenFormField>
+                                    </RadzenColumn>
+                                    <RadzenColumn Size="12" SizeMD="4">
+                                        <RadzenFormField Text="Şehir" Required="true">
+                                            <RadzenTextBox @bind-Value="@checkoutCommand.State" Style="width: 100%;" />
+                                        </RadzenFormField>
+                                    </RadzenColumn>
+                                    <RadzenColumn Size="12" SizeMD="4">
+                                        <RadzenFormField Text="Posta Kodu" Required="true">
+                                            <RadzenTextBox @bind-Value="@checkoutCommand.ZipCode" Style="width: 100%;" />
+                                        </RadzenFormField>
+                                    </RadzenColumn>
+                                </RadzenRow>
+                            </RadzenTemplateForm>
+                        </RadzenStack>
+                    </RadzenCard>
 
-                <div class="card">
-                    <div class="card-header">
-                        <h5>Ödeme Bilgileri</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="mb-3">
-                            <label class="form-label">Kart Üzerindeki İsim *</label>
-                            <input type="text" class="form-control" @bind="checkoutCommand.CardName" required />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Kart Numarası *</label>
-                            <input type="text" class="form-control" @bind="checkoutCommand.CardNumber" required maxlength="16" />
-                        </div>
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <label class="form-label">Son Kullanma Tarihi (MM/YY) *</label>
-                                <input type="text" class="form-control" @bind="checkoutCommand.Expiration" required placeholder="12/26" />
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">CVV *</label>
-                                <input type="text" class="form-control" @bind="checkoutCommand.CVV" required maxlength="3" />
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Ödeme Yöntemi *</label>
-                            <select class="form-select" @bind="checkoutCommand.PaymentMethod">
-                                <option value="1">Kredi Kartı</option>
-                                <option value="2">Banka Kartı</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-            </div>
+                    <RadzenCard>
+                        <RadzenStack Gap="1rem">
+                            <RadzenHeading Size="HeadingSize.H5" Text="Ödeme Bilgileri" />
+                            <RadzenTemplateForm Data="@checkoutCommand">
+                                <RadzenFormField Text="Kart Üzerindeki İsim" Required="true">
+                                    <RadzenTextBox @bind-Value="@checkoutCommand.CardName" Style="width: 100%;" />
+                                </RadzenFormField>
+                                <RadzenFormField Text="Kart Numarası" Required="true">
+                                    <RadzenTextBox @bind-Value="@checkoutCommand.CardNumber" MaxLength="16" Style="width: 100%;" />
+                                </RadzenFormField>
+                                <RadzenRow Gap="1rem">
+                                    <RadzenColumn Size="12" SizeMD="6">
+                                        <RadzenFormField Text="Son Kullanma Tarihi (MM/YY)" Required="true">
+                                            <RadzenTextBox @bind-Value="@checkoutCommand.Expiration" Placeholder="12/26" Style="width: 100%;" />
+                                        </RadzenFormField>
+                                    </RadzenColumn>
+                                    <RadzenColumn Size="12" SizeMD="6">
+                                        <RadzenFormField Text="CVV" Required="true">
+                                            <RadzenTextBox @bind-Value="@checkoutCommand.CVV" MaxLength="3" Style="width: 100%;" />
+                                        </RadzenFormField>
+                                    </RadzenColumn>
+                                </RadzenRow>
+                                <RadzenFormField Text="Ödeme Yöntemi" Required="true">
+                                    <RadzenDropDown @bind-Value="@checkoutCommand.PaymentMethod" Data="@paymentMethods" TextProperty="Text" ValueProperty="Value" Style="width: 100%;" />
+                                </RadzenFormField>
+                            </RadzenTemplateForm>
+                        </RadzenStack>
+                    </RadzenCard>
+                </RadzenStack>
+            </RadzenColumn>
 
-            <div class="col-md-4">
-                <div class="card">
-                    <div class="card-header">
-                        <h5>Sipariş Özeti</h5>
-                    </div>
-                    <div class="card-body">
-                        @foreach (var item in basket.Items)
-                        {
-                            <div class="d-flex justify-content-between mb-2">
-                                <span>@item.ProductName x @item.Quantity</span>
-                                <span>@((item.Price * item.Quantity).ToString("C"))</span>
-                            </div>
-                        }
-                        <hr>
-                        <div class="d-flex justify-content-between mb-2">
-                            <span>Ara Toplam:</span>
-                            <strong>@basket.TotalPrice.ToString("C")</strong>
-                        </div>
-                        @if (basket.Discount > 0)
-                        {
-                            <div class="d-flex justify-content-between mb-2 text-success">
-                                <span>İndirim:</span>
-                                <strong>-@basket.Discount.ToString("C")</strong>
-                            </div>
-                        }
-                        <hr>
-                        <div class="d-flex justify-content-between mb-3">
-                            <span><strong>Toplam:</strong></span>
-                            <strong class="text-primary">@((basket.TotalPrice - basket.Discount).ToString("C"))</strong>
-                        </div>
-                        <button class="btn btn-primary w-100 btn-lg" @onclick="SubmitCheckout" disabled="@isProcessing">
+            <RadzenColumn Size="12" SizeMD="4">
+                <RadzenCard>
+                    <RadzenStack Gap="1rem">
+                        <RadzenHeading Size="HeadingSize.H5" Text="Sipariş Özeti" />
+                        <RadzenStack Gap="0.5rem">
+                            @foreach (var item in basket.Items)
+                            {
+                                <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween">
+                                    <RadzenLabel Text="@($"{item.ProductName} x {item.Quantity}")" />
+                                    <RadzenLabel Text="@((item.Price * item.Quantity).ToString("C"))" />
+                                </RadzenStack>
+                            }
+                            <hr style="margin: 0.5rem 0; border: none; border-top: 1px solid var(--rz-border-color);" />
+                            <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween">
+                                <RadzenLabel Text="Ara Toplam:" />
+                                <RadzenLabel Text="@basket.TotalPrice.ToString("C")" Style="font-weight: 600;" />
+                            </RadzenStack>
+                            @if (basket.Discount > 0)
+                            {
+                                <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween">
+                                    <RadzenLabel Text="İndirim:" Style="color: var(--rz-success);" />
+                                    <RadzenLabel Style="font-weight: 600; color: var(--rz-success);">
+                                        -@basket.Discount.ToString("C")
+                                    </RadzenLabel>
+                                </RadzenStack>
+                            }
+                            <hr style="margin: 0.5rem 0; border: none; border-top: 1px solid var(--rz-border-color);" />
+                            <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween">
+                                <RadzenLabel Text="Toplam:" Style="font-weight: 600;" />
+                                <RadzenLabel Text="@((basket.TotalPrice - basket.Discount).ToString("C"))" Style="font-size: 1.25rem; font-weight: 600; color: var(--rz-primary);" />
+                            </RadzenStack>
+                        </RadzenStack>
+                        <RadzenButton Text="Siparişi Tamamla" ButtonStyle="ButtonStyle.Primary" Size="ButtonSize.Large" Click="@SubmitCheckout" Disabled="@isProcessing" Style="width: 100%;">
                             @if (isProcessing)
                             {
-                                <span class="spinner-border spinner-border-sm me-2"></span>
+                                <RadzenProgressBarCircular ShowValue="false" Size="ProgressBarCircularSize.Small" Style="margin-right: 0.5rem;" />
                             }
-                            Siparişi Tamamla
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
+                        </RadzenButton>
+                    </RadzenStack>
+                </RadzenCard>
+            </RadzenColumn>
+        </RadzenRow>
     }
-</div>
+</RadzenStack>
 
 @code {
     private ShoppingCartDto? basket;
     private CheckoutBasketCommand checkoutCommand = new();
     private bool isProcessing = false;
+    private List<PaymentMethodOption> paymentMethods = new()
+    {
+        new PaymentMethodOption { Value = 1, Text = "Kredi Kartı" },
+        new PaymentMethodOption { Value = 2, Text = "Banka Kartı" }
+    };
+
+    private class PaymentMethodOption
+    {
+        public int Value { get; set; }
+        public string Text { get; set; } = string.Empty;
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -179,12 +193,36 @@
             if (result)
             {
                 BasketStateService.Clear();
+                NotificationService.Notify(new NotificationMessage 
+                { 
+                    Severity = NotificationSeverity.Success, 
+                    Summary = "Sipariş Tamamlandı", 
+                    Detail = "Siparişiniz başarıyla oluşturuldu", 
+                    Duration = 4000 
+                });
                 Navigation.NavigateTo("/orders");
+            }
+            else
+            {
+                NotificationService.Notify(new NotificationMessage 
+                { 
+                    Severity = NotificationSeverity.Warning, 
+                    Summary = "Uyarı", 
+                    Detail = "Sipariş oluşturulamadı", 
+                    Duration = 4000 
+                });
             }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error during checkout: {ex.Message}");
+            NotificationService.Notify(new NotificationMessage 
+            { 
+                Severity = NotificationSeverity.Error, 
+                Summary = "Hata", 
+                Detail = "Sipariş oluşturulurken bir hata oluştu", 
+                Duration = 4000 
+            });
         }
         finally
         {

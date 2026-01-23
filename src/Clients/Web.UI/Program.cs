@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Radzen;
 using Web.UI;
 using Web.UI.Services;
 
@@ -33,5 +34,11 @@ builder.Services.AddHttpClient<IOrderingService, OrderingService>(client =>
 // Register state management services
 builder.Services.AddSingleton<BasketStateService>();
 builder.Services.AddScoped<UserStateService>();
+
+// Register Radzen services
+builder.Services.AddScoped<DialogService>();
+builder.Services.AddScoped<NotificationService>();
+builder.Services.AddScoped<TooltipService>();
+builder.Services.AddScoped<ContextMenuService>();
 
 await builder.Build().RunAsync();

@@ -1,32 +1,27 @@
 @using Web.UI.Models
+@inject NavigationManager Navigation
 
-<div class="card h-100">
+<RadzenCard Style="height: 100%; display: flex; flex-direction: column;">
     @if (!string.IsNullOrEmpty(Product.ImageUrl))
     {
-        <img src="@Product.ImageUrl" class="card-img-top" alt="@Product.Name" style="height: 200px; object-fit: cover;">
+        <RadzenImage Path="@Product.ImageUrl" Alt="@Product.Name" Style="width: 100%; height: 200px; object-fit: cover;" />
     }
     else
     {
-        <div class="card-img-top bg-secondary d-flex align-items-center justify-content-center" style="height: 200px;">
-            <span class="text-white">Resim Yok</span>
+        <div style="width: 100%; height: 200px; background-color: var(--rz-base-300); display: flex; align-items: center; justify-content: center;">
+            <RadzenLabel Text="Resim Yok" Style="color: var(--rz-text-secondary-color);" />
         </div>
     }
-    <div class="card-body d-flex flex-column">
-        <h5 class="card-title">@Product.Name</h5>
-        <p class="card-text flex-grow-1">@(Product.Description ?? "Açıklama yok")</p>
-        <p class="card-text">
-            <strong class="text-primary">@Product.Price.ToString("C")</strong>
-        </p>
-        <div class="mt-auto">
-            <button class="btn btn-primary w-100" @onclick="() => OnAddToBasket.InvokeAsync(Product)">
-                Sepete Ekle
-            </button>
-            <a href="/product/@Product.Id" class="btn btn-outline-secondary w-100 mt-2">
-                Detaylar
-            </a>
-        </div>
-    </div>
-</div>
+    <RadzenStack Gap="0.5rem" Style="padding: 1rem; flex: 1; display: flex; flex-direction: column;">
+        <RadzenHeading Size="HeadingSize.H5" Text="@Product.Name" />
+        <RadzenLabel Text="@(Product.Description ?? "Açıklama yok")" Style="flex: 1;" />
+        <RadzenLabel Text="@Product.Price.ToString("C")" Style="font-size: 1.25rem; font-weight: 600; color: var(--rz-primary);" />
+        <RadzenStack Gap="0.5rem" Style="margin-top: auto;">
+            <RadzenButton Text="Sepete Ekle" ButtonStyle="ButtonStyle.Primary" Click="@(() => OnAddToBasket.InvokeAsync(Product))" Style="width: 100%;" />
+            <RadzenButton Text="Detaylar" ButtonStyle="ButtonStyle.Secondary" Variant="Variant.Outlined" Click="@(() => Navigation.NavigateTo($"/product/{Product.Id}"))" Style="width: 100%;" />
+        </RadzenStack>
+    </RadzenStack>
+</RadzenCard>
 
 @code {
     [Parameter]

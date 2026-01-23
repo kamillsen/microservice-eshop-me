@@ -4,44 +4,43 @@
 @inject UserStateService UserStateService
 @inject BasketStateService BasketStateService
 @inject NavigationManager Navigation
+@inject NotificationService NotificationService
 
 <PageTitle>Ana Sayfa - E-Ticaret</PageTitle>
 
-<div class="container mt-4">
-    <h1 class="mb-4">Ürünler</h1>
+<RadzenStack Gap="1.5rem">
+    <RadzenHeading Size="HeadingSize.H1" Text="Ürünler" />
 
     @if (errorMessage != null)
     {
-        <div class="alert alert-danger" role="alert">
-            <strong>Hata:</strong> @errorMessage
-            <br />
-            <small>Lütfen API Gateway'in çalıştığından emin olun (http://localhost:5000)</small>
-        </div>
+        <RadzenAlert AlertStyle="AlertStyle.Danger" Title="Hata" Text="@errorMessage">
+            <ChildContent>
+                <small>Lütfen API Gateway'in çalıştığından emin olun (http://localhost:5000)</small>
+            </ChildContent>
+        </RadzenAlert>
     }
     else if (products == null)
     {
-        <div class="text-center">
-            <div class="spinner-border" role="status">
-                <span class="visually-hidden">Yükleniyor...</span>
-            </div>
-        </div>
+        <RadzenStack AlignItems="AlignItems.Center" JustifyContent="JustifyContent.Center" Style="min-height: 200px;">
+            <RadzenProgressBarCircular ShowValue="false" Size="ProgressBarCircularSize.Large" />
+        </RadzenStack>
     }
     else if (!products.Any())
     {
-        <p>Henüz ürün bulunmamaktadır.</p>
+        <RadzenAlert AlertStyle="AlertStyle.Info" Text="Henüz ürün bulunmamaktadır." />
     }
     else
     {
-        <div class="row">
+        <RadzenRow Gap="1rem">
             @foreach (var product in products)
             {
-                <div class="col-md-4 mb-4">
+                <RadzenColumn Size="12" SizeMD="4" SizeLG="4">
                     <ProductCard Product="product" OnAddToBasket="AddToBasket" />
-                </div>
+                </RadzenColumn>
             }
-        </div>
+        </RadzenRow>
     }
-</div>
+</RadzenStack>
 
 @code {
     private List<ProductDto>? products;
@@ -98,10 +97,25 @@
             // Backend sepeti kaydederken TotalPrice ve Discount'ı hesaplayacak
             basket = await BasketService.StoreBasketAsync(basket);
             BasketStateService.UpdateItemCount(basket.Items.Sum(i => i.Quantity));
+            
+            NotificationService.Notify(new NotificationMessage 
+            { 
+                Severity = NotificationSeverity.Success, 
+                Summary = "Başarılı", 
+                Detail = $"{product.Name} sepete eklendi", 
+                Duration = 3000 
+            });
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error adding to basket: {ex.Message}");
+            NotificationService.Notify(new NotificationMessage 
+            { 
+                Severity = NotificationSeverity.Error, 
+                Summary = "Hata", 
+                Detail = "Ürün sepete eklenirken bir hata oluştu", 
+                Duration = 4000 
+            });
         }
     }
 }

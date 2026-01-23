@@ -4,54 +4,57 @@
 
 <PageTitle>Siparişlerim</PageTitle>
 
-<div class="container mt-4">
-    <h1 class="mb-4">Siparişlerim</h1>
+<RadzenStack Gap="1.5rem">
+    <RadzenHeading Size="HeadingSize.H1" Text="Siparişlerim" />
 
     @if (orders == null)
     {
-        <div class="text-center">
-            <div class="spinner-border" role="status">
-                <span class="visually-hidden">Yükleniyor...</span>
-            </div>
-        </div>
+        <RadzenStack AlignItems="AlignItems.Center" JustifyContent="JustifyContent.Center" Style="min-height: 200px;">
+            <RadzenProgressBarCircular ShowValue="false" Size="ProgressBarCircularSize.Large" />
+        </RadzenStack>
     }
     else if (!orders.Any())
     {
-        <div class="alert alert-info">
-            Henüz siparişiniz bulunmamaktadır. <a href="/">Alışverişe başlamak için tıklayın</a>
-        </div>
+        <RadzenAlert AlertStyle="AlertStyle.Info" Title="Henüz siparişiniz bulunmamaktadır">
+            <ChildContent>
+                <RadzenLink Path="/" Text="Alışverişe başlamak için tıklayın" />
+            </ChildContent>
+        </RadzenAlert>
     }
     else
     {
-        <div class="list-group">
+        <RadzenStack Gap="1rem">
             @foreach (var order in orders)
             {
-                <div class="list-group-item">
-                    <div class="d-flex w-100 justify-content-between">
-                        <h5 class="mb-1">Sipariş #@order.Id.ToString().Substring(0, 8)</h5>
-                        <small>@order.OrderDate.ToString("dd.MM.yyyy HH:mm")</small>
-                    </div>
-                    <p class="mb-1">
-                        <span class="badge bg-@GetStatusColor(order.Status)">@order.Status</span>
-                    </p>
-                    <div class="mt-2">
-                        <p class="mb-1">
-                            <strong>@order.Items.Count ürün</strong> - 
-                            Toplam: <strong class="text-primary">@((order.TotalPrice - order.Discount).ToString("C"))</strong>
-                            @if (order.Discount > 0)
-                            {
-                                <span class="text-success">(İndirim: -@order.Discount.ToString("C"))</span>
-                            }
-                        </p>
-                        <small class="text-muted">
-                            Ürünler: @string.Join(", ", order.Items.Select(i => $"{i.ProductName} x{i.Quantity}"))
-                        </small>
-                    </div>
-                </div>
+                <RadzenCard>
+                    <RadzenStack Gap="0.75rem">
+                        <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween" AlignItems="AlignItems.Center">
+                            <RadzenHeading Size="HeadingSize.H5" Text="@($"Sipariş #{order.Id.ToString().Substring(0, 8)}")" />
+                            <RadzenLabel Text="@order.OrderDate.ToString("dd.MM.yyyy HH:mm")" Style="color: var(--rz-text-secondary-color);" />
+                        </RadzenStack>
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                            <RadzenLabel Text="Durum:" />
+                            <RadzenBadge BadgeStyle="@GetStatusBadgeStyle(order.Status)" Text="@order.Status" />
+                        </RadzenStack>
+                        <RadzenStack Gap="0.25rem">
+                            <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.Center">
+                                <RadzenLabel Text="@($"{order.Items.Count} ürün")" Style="font-weight: 600;" />
+                                <RadzenLabel Text="-" />
+                                <RadzenLabel Text="Toplam:" Style="font-weight: 600;" />
+                                <RadzenLabel Text="@((order.TotalPrice - order.Discount).ToString("C"))" Style="font-weight: 600; color: var(--rz-primary);" />
+                                @if (order.Discount > 0)
+                                {
+                                    <RadzenLabel Text="@($"(İndirim: -{order.Discount.ToString("C")})")" Style="color: var(--rz-success);" />
+                                }
+                            </RadzenStack>
+                            <RadzenLabel Text="@($"Ürünler: {string.Join(", ", order.Items.Select(i => $"{i.ProductName} x{i.Quantity}"))}")" Style="color: var(--rz-text-secondary-color); font-size: 0.875rem;" />
+                        </RadzenStack>
+                    </RadzenStack>
+                </RadzenCard>
             }
-        </div>
+        </RadzenStack>
     }
-</div>
+</RadzenStack>
 
 @code {
     private List<OrderDto>? orders;
@@ -70,15 +73,15 @@
         }
     }
 
-    private string GetStatusColor(string status)
+    private BadgeStyle GetStatusBadgeStyle(string status)
     {
         return status.ToLower() switch
         {
-            "pending" => "warning",
-            "shipped" => "info",
-            "delivered" => "success",
-            "cancelled" => "danger",
-            _ => "secondary"
+            "pending" => BadgeStyle.Warning,
+            "shipped" => BadgeStyle.Info,
+            "delivered" => BadgeStyle.Success,
+            "cancelled" => BadgeStyle.Danger,
+            _ => BadgeStyle.Secondary
         };
     }
 }
