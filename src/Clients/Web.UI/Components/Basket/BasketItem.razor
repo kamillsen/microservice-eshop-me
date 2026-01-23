@@ -5,9 +5,15 @@
         <RadzenColumn Size="12" SizeMD="6">
             <RadzenStack Gap="0.25rem">
                 <RadzenHeading Size="HeadingSize.H5" Text="@Item.ProductName" />
-                <RadzenLabel Style="color: var(--rz-text-secondary-color);">
-                    Birim Fiyat: @Item.Price.ToString("C")
-                </RadzenLabel>
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.Center">
+                    <RadzenLabel Style="color: var(--rz-text-secondary-color);">
+                        Birim Fiyat: @Item.Price.ToString("C")
+                    </RadzenLabel>
+                    @if (Item.Discount > 0)
+                    {
+                        <RadzenBadge Text="@($"İndirim: -{Item.Discount.ToString("C")}")" BadgeStyle="BadgeStyle.Success" />
+                    }
+                </RadzenStack>
             </RadzenStack>
         </RadzenColumn>
         <RadzenColumn Size="12" SizeMD="3">
@@ -18,7 +24,17 @@
             </RadzenStack>
         </RadzenColumn>
         <RadzenColumn Size="12" SizeMD="2">
-            <RadzenLabel Text="@((Item.Price * Item.Quantity).ToString("C"))" Style="font-weight: 600; text-align: right;" />
+            <RadzenStack Gap="0.25rem" Style="text-align: right;">
+                @if (Item.Discount > 0)
+                {
+                    <RadzenLabel Text="@((Item.Price * Item.Quantity - Item.Discount).ToString("C"))" Style="font-weight: 600; color: var(--rz-primary);" />
+                    <RadzenLabel Text="@((Item.Price * Item.Quantity).ToString("C"))" Style="font-size: 0.875rem; text-decoration: line-through; color: var(--rz-text-secondary-color);" />
+                }
+                else
+                {
+                    <RadzenLabel Text="@((Item.Price * Item.Quantity).ToString("C"))" Style="font-weight: 600;" />
+                }
+            </RadzenStack>
         </RadzenColumn>
         <RadzenColumn Size="12" SizeMD="1">
             <RadzenButton Icon="close" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small" Click="@(() => OnRemove.InvokeAsync(Item))" />
